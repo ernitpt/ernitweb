@@ -1,0 +1,139 @@
+import { db } from './firebase';
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  updateDoc,
+  doc,
+  serverTimestamp,
+  deleteDoc,
+  getDocs,
+} from 'firebase/firestore';
+import { Notification } from '../types';
+
+export class NotificationService {
+  /** Add a new notification */
+  async createNotification(
+    userId: string,
+    type: string,
+    title: string,
+    message: string,
+    data?: any
+  ) {
+    const docRef = await addDoc(collection(db, 'notifications'), {
+      userId, // Fixed field name to match type definition
+      type,
+      title,
+      message,
+      read: false,
+      createdAt: serverTimestamp(),
+      data: data || {},
+    });
+    return docRef.id;
+  }
+
+  /** Create a friend request notification */
+  async createFriendRequestNotification(
+    recipientId: string,
+    senderId: string,
+    senderName: string,
+    friendRequestId: string,
+    senderProfileImageUrl?: string,
+    senderCountry?: string
+  ) {
+    await this.createNotification(
+      recipientId,
+      'friend_request',
+      'New Friend Request',
+      `${senderName} wants to be your friend`,
+      {
+        friendRequestId,
+        senderId,
+        senderName,
+        senderProfileImageUrl,
+        senderCountry,
+      }
+    );
+  }
+
+  /** Listen for real-time updates for one user */
+  listenToUserNotifications = (
+    userId: string,
+    callback: (notifications: Notification[]) => void
+  ) => {
+    const q = query(
+      collection(db, 'notifications'),
+      where('userId', '==', userId), // Fixed field name to match type definition
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const notifications = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      })) as Notification[];
+      callback(notifications);
+    });
+
+    return unsubscribe;
+  };
+
+  /** Mark as read */
+  async markAsRead(notificationId: string) {
+    const ref = doc(db, 'notifications', notificationId);
+    await updateDoc(ref, { read: true });
+  }
+
+  /** Delete a single notification */
+  async deleteNotification(notificationId: string) {
+    if (!notificationId) {
+      throw new Error('Notification ID is required');
+    }
+    const ref = doc(db, 'notifications', notificationId);
+    await deleteDoc(ref);
+  }
+
+  /** Clear all notifications for a user */
+  async clearAllNotifications(userId: string) {
+    try {
+      const notificationsRef = collection(db, 'notifications');
+      const q = query(notificationsRef, where('userId', '==', userId));
+      const snapshot = await getDocs(q);
+      
+      const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      
+      console.log(`✅ Cleared ${snapshot.docs.length} notifications for user ${userId}`);
+    } catch (error) {
+      console.error('❌ Error clearing all notifications:', error);
+      throw error;
+    }
+  }
+
+  /** Clear all read notifications for a user */
+  async clearReadNotifications(userId: string) {
+    try {
+      const notificationsRef = collection(db, 'notifications');
+      const q = query(
+        notificationsRef, 
+        where('userId', '==', userId),
+        where('read', '==', true)
+      );
+      const snapshot = await getDocs(q);
+      
+      const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      
+      console.log(`✅ Cleared ${snapshot.docs.length} read notifications for user ${userId}`);
+    } catch (error) {
+      console.error('❌ Error clearing read notifications:', error);
+      throw error;
+    }
+  }
+}
+
+export const notificationService = new NotificationService();

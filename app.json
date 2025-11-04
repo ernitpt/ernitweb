@@ -1,0 +1,74 @@
+{
+  "expo": {
+    "name": "Ernit",
+    "slug": "ernit",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/icon.png",
+    "owner": "ernit",
+    "scheme": "ernit",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./src/assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.ernit.ernit",
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "We read your step count to track your activity and show progress.",
+        "NSHealthUpdateUsageDescription": "We may write workout summaries you complete in the app.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.developer.healthkit": true
+      },
+      "supportsTablet": false
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff",
+        "package": "com.ernit.app"
+      },
+      "package": "com.ernit.ernit",
+      "permissions": [
+        "android.permission.ACTIVITY_RECOGNITION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/icon.png",
+      "name": "Ernit",
+      "shortName": "Ernit",
+      "themeColor": "#ffffff",
+      "backgroundColor": "#ffffff",
+      "display": "standalone"
+    },
+    "entryPoint": "node_modules/expo/AppEntry.js",
+    "extra": {
+      "firebaseApiKey": "AIzaSyCf7lq2zKnTc5ArgOMLPhhUIbFYLnEzgJc",
+      "firebaseAuthDomain": "ernit-3fc0b.firebaseapp.com",
+      "firebaseProjectId": "ernit-3fc0b",
+      "firebaseStorageBucket": "ernit-3fc0b.firebasestorage.app",
+      "firebaseMessagingSenderId": "806487127981",
+      "firebaseAppId": "1:806487127981:web:23cbcebb93e6aa799b5324",
+      "firebaseMeasurementId": "G-5V9WSP44EG",
+      "eas": {
+        "projectId": "a17b540a-7edc-4ebc-b73c-c8d019738e0d"
+      }
+    },
+    "plugins": [
+      "expo-web-browser",
+      "react-native-google-fit",
+      "react-native-health",
+      "react-native-background-fetch",
+      "expo-secure-store"
+    ]
+  }
+}

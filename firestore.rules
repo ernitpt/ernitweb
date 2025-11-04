@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can read/write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow reading other users' profiles for friend discovery
+      allow read: if request.auth != null;
+      
+      // Users can read/write their own goals
+      match /goals/{goalId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // Experience gifts - authenticated users can read/write
+    match /experienceGifts/{giftId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Goals collection (if stored at root level)
+    match /goals/{goalId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Hints
+    match /hints/{hintId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Friend requests - users can read their own requests and create new ones
+    match /friendRequests/{requestId} {
+      allow read: if request.auth != null && 
+        (request.auth.uid == resource.data.senderId || 
+         request.auth.uid == resource.data.recipientId);
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.senderId;
+      allow update: if request.auth != null && 
+        request.auth.uid == resource.data.recipientId;
+    }
+    
+    // Friends relationships - users can read their own friends and create/delete relationships
+    match /friends/{friendId} {
+      allow read: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || request.auth.uid == resource.data.friendId);
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+      allow delete: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || request.auth.uid == resource.data.friendId);
+    }
+    
+    // Notifications - users can read their own notifications
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      allow delete: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+    }
+    
+    // Experiences - public read, authenticated write
+    match /experiences/{experienceId} {
+      allow read: if true; // Public read for browsing experiences
+      allow write: if request.auth != null;
+    }
+  }
+}

@@ -1,0 +1,241 @@
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  ActivityIndicator,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useApp } from '../context/AppContext';
+import MainScreen from './MainScreen';
+import { experienceGiftService } from '../services/ExperienceGiftService';
+import { userService } from '../services/userService';
+import { ExperienceGift, RootStackParamList } from '../types';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../services/firebase';
+
+type PurchasedGiftsNavigationProp = NativeStackNavigationProp<
+  RootStackParamList,
+  'PurchasedGifts'
+>;
+
+const PurchasedGiftsScreen = () => {
+  const { state } = useApp();
+  const userId = state.user?.id;
+  const [gifts, setGifts] = useState<ExperienceGift[]>([]);
+  const [loading, setLoading] = useState(true);
+  const navigation = useNavigation<PurchasedGiftsNavigationProp>();
+
+  useEffect(() => {
+    const fetchGifts = async () => {
+      if (!userId) return;
+      setLoading(true);
+      const userGifts = await experienceGiftService.getExperienceGiftsByUser(userId);
+      setGifts(userGifts);
+      setLoading(false);
+    };
+
+    fetchGifts();
+  }, [userId]);
+
+  const formatDate = (date: any) => {
+    if (!date) return 'N/A';
+    const jsDate =
+      typeof date.toDate === 'function' ? date.toDate() : new Date(date);
+    return jsDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  const GiftItem = ({ item }: { item: ExperienceGift }) => {
+    const [claimedByName, setClaimedByName] = useState<string | null>(null);
+    const [loadingName, setLoadingName] = useState(false);
+
+    useEffect(() => {
+      const fetchClaimerName = async () => {
+        if (item.status !== 'claimed') return;
+
+        try {
+          console.log(`🔍 Looking up goal for gift ${item.id}...`);
+          const q = query(
+            collection(db, 'goals'),
+            where('experienceGiftId', '==', item.id)
+          );
+          const snap = await getDocs(q);
+
+          if (snap.empty) {
+            console.log(`⚠️ No goal found for gift ${item.id}`);
+            return;
+          }
+
+          const goalDoc = snap.docs[0];
+          const goalData = goalDoc.data();
+          console.log(`📘 Goal found:`, goalData);
+
+          if (goalData.userId) {
+            const name = await userService.getUserName(goalData.userId);
+            console.log(`✅ Claimer name:`, name);
+            setClaimedByName(name);
+          } else {
+            console.log(`⚠️ Goal missing userId for gift ${item.id}`);
+          }
+        } catch (err) {
+          console.error(`❌ Error fetching claimer for gift ${item.id}:`, err);
+        }
+      };
+
+      fetchClaimerName();
+    }, [item.status, item.id]);
+
+
+    return (
+      <View style={styles.card}>
+        <View style={styles.cardRow}>
+          <Text style={styles.title}>{item.experience.title}</Text>
+          <Text
+            style={[
+              styles.status,
+              item.status === 'claimed'
+                ? styles.statusClaimed
+                : styles.statusPending,
+            ]}
+          >
+            {item.status ? item.status.toUpperCase() : 'PENDING'}
+          </Text>
+        </View>
+
+        {item.status === 'claimed' ? (
+          <Text style={[styles.detail, { color: '#166534', fontWeight: '500' }]}>
+            Claimed by:{' '}
+            {loadingName ? (
+              <Text style={{ color: '#9CA3AF' }}>Fetching name...</Text>
+            ) : (
+              claimedByName || 'Unknown'
+            )}
+          </Text>
+        ) : (
+          <Text style={styles.detail}>Claim Code: {item.claimCode}</Text>
+        )}
+
+        <Text style={styles.detail}>Created: {formatDate(item.createdAt)}</Text>
+      </View>
+    );
+  };
+
+  const headerColors = ['#462088ff', '#235c9eff'] as const;
+
+  return (
+    <MainScreen activeRoute="Settings">
+      <StatusBar style="light" />
+      <LinearGradient colors={headerColors} style={styles.gradientHeader}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Purchased Gifts</Text>
+        </View>
+      </LinearGradient>
+
+      {loading ? (
+        <ActivityIndicator
+          size="large"
+          color="#8b5cf6"
+          style={{ marginTop: 50 }}
+        />
+      ) : gifts.length === 0 ? (
+        <Text style={styles.emptyText}>No purchased gifts yet.</Text>
+      ) : (
+        <FlatList
+          data={gifts}
+          renderItem={({ item }) => <GiftItem item={item} />}
+          keyExtractor={(item) => item.id!}
+          contentContainerStyle={styles.listContainer}
+        />
+      )}
+    </MainScreen>
+  );
+};
+
+const styles = StyleSheet.create({
+  gradientHeader: {
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    overflow: 'hidden',
+    paddingBottom: 18,
+    paddingTop: 28,
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 34,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  listContainer: {
+    padding: 20,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+    padding: 16,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    flex: 1,
+    marginRight: 10,
+  },
+  status: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  statusClaimed: {
+    backgroundColor: '#DCFCE7',
+    color: '#166534',
+  },
+  statusPending: {
+    backgroundColor: '#FEF9C3',
+    color: '#854D0E',
+  },
+  detail: {
+    color: '#4b5563',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#6b7280',
+    marginTop: 50,
+    fontSize: 16,
+  },
+});
+
+export default PurchasedGiftsScreen;
