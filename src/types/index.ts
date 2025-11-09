@@ -70,10 +70,12 @@ export type ExperienceCategory = 'adventure' | 'relaxation' | 'food-culture' | '
 export interface Experience {
   id: string;
   title: string;
+  subtitle: string;
   description: string;
   category: ExperienceCategory;
   price: number;
-  imageUrl: string;
+  imageUrl: string[];
+  coverImageUrl: string;
   duration?: string;
   location?: string;
   partnerId: string;
@@ -86,11 +88,12 @@ export interface ExperienceGift {
   giverName: string;
   recipientId?: string;
   experienceId: string;
-  experience: Experience;
-  personalizedMessage: string;
+  // experience: Experience;
+  personalizedMessage?: string;
   deliveryDate: Date;
   status: 'pending' | 'claimed' | 'completed';
   createdAt: Date;
+  payment: string;
   claimedAt?: Date;
   completedAt?: Date;
   claimCode: string;
@@ -103,7 +106,7 @@ export interface Goal {
   experienceGiftId: string;
   title: string;
   description: string;
-
+  isWeekCompleted?: Boolean;
   /** Overall (weeks) */
   targetCount: number;          // total weeks to complete
   currentCount: number;         // weeks completed so far
@@ -232,6 +235,7 @@ export type RootStackParamList = {
   Profile: undefined;
   Roadmap: { goal: Goal };
   Goals: undefined;
+  ExperienceCheckout: { experience: Experience };
   ExperienceDetails: { experience: Experience };
   GoalDetail: { goalId: string };
   Completion: { goal: Goal; experienceGift: ExperienceGift };
@@ -243,13 +247,13 @@ export type RootStackParamList = {
   FriendProfile: { userId: string };
   FriendsList: undefined;
   PurchasedGifts: undefined;
+  Confirmation: { experienceGift: ExperienceGift };
 };
 
 export type GiverStackParamList = {
   CategorySelection: undefined;
-  ExperienceList: { category: ExperienceCategory };
   ExperienceDetails: { experience: Experience };
-  // Main: undefined;
+  ExperienceCheckout: { experience: Experience };
   Confirmation: { experienceGift: ExperienceGift };
 };
 

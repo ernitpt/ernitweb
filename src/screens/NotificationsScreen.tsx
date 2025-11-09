@@ -68,7 +68,7 @@ const NotificationsScreen = () => {
     if (n.type === 'gift_received') {
       try {
         const gift = await experienceGiftService.getExperienceGiftById(n.data.giftId);
-        if (gift && gift.experience) {
+        if (gift && gift.experienceId) {
           navigation.navigate('GoalSetting', { experienceGift: gift });
         }
       } catch (error) {
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 34,
+    // paddingTop: 34,
     paddingBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 4,
+    // marginBottom: 4,
   },
 
   clearAllButton: {

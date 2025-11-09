@@ -1,11 +1,23 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Animated, Pressable, Easing } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  Animated,
+  Pressable,
+  Easing,
+  Platform,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Goal } from '../../types';
 import { goalService } from '../../services/GoalService';
 import { userService } from '../../services/userService';
 import { notificationService } from '../../services/NotificationService';
 import { experienceGiftService } from '../../services/ExperienceGiftService';
+import { experienceService } from '../../services/ExperienceService';
 import { RootStackParamList } from '../../types';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,29 +30,40 @@ interface DetailedGoalCardProps {
   onFinish?: (goal: Goal) => void;
 }
 
-// ===== Debug switch =====
-// Production default = false (one session per day).
-const DEBUG_ALLOW_MULTIPLE_PER_DAY: boolean = true;
+const DEBUG_ALLOW_MULTIPLE_PER_DAY = false;
+const TIMER_STORAGE_KEY = 'goal_timer_state_';
 
 function isoDay(d: Date) {
-  const y = d.getFullYear();
-  const m = `${d.getMonth() + 1}`.padStart(2, '0');
-  const dd = `${d.getDate()}`.padStart(2, '0');
+  const local = new Date(d);
+  local.setHours(0, 0, 0, 0);
+  const y = local.getFullYear();
+  const m = `${local.getMonth() + 1}`.padStart(2, '0');
+  const dd = `${local.getDate()}`.padStart(2, '0');
   return `${y}-${m}-${dd}`;
 }
+
 function addDays(d: Date, days: number) {
   const x = new Date(d);
   x.setDate(d.getDate() + days);
   x.setHours(0, 0, 0, 0);
   return x;
 }
+
 function rollingWeek(start: Date) {
   const s = new Date(start);
   s.setHours(0, 0, 0, 0);
   return Array.from({ length: 7 }, (_, i) => addDays(s, i));
 }
+
 function day2(d: Date) {
   return d.toLocaleDateString('en-US', { weekday: 'short' }).slice(0, 2);
+}
+
+function formatNextWeekDay(weekStartAt?: Date | null) {
+  if (!weekStartAt) return '';
+  const next = new Date(weekStartAt);
+  next.setDate(next.getDate() + 7);
+  return next.toLocaleDateString('en-US', { dateStyle: 'short' });
 }
 
 const COLORS = {
@@ -53,7 +76,9 @@ const COLORS = {
   sub: '#6B7280',
 };
 
-// ===== Animated Capsule =====
+// ====================
+// Capsule component
+// ====================
 const Capsule: React.FC<{
   isFilled: boolean;
   fillColor: string;
@@ -62,13 +87,11 @@ const Capsule: React.FC<{
   const widthAnim = useRef(new Animated.Value(isFilled ? 1 : 0)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
-
   const didAnimateIn = useRef(isFilled);
 
   useEffect(() => {
     if (isFilled && !didAnimateIn.current) {
       didAnimateIn.current = true;
-
       Animated.sequence([
         Animated.timing(widthAnim, {
           toValue: 1,
@@ -121,19 +144,27 @@ const Capsule: React.FC<{
   });
 
   return (
-    <Animated.View style={[styles.capsule, { backgroundColor: emptyColor, transform: [{ scale: scaleAnim }] }]}>
+    <Animated.View
+      style={[
+        styles.capsule,
+        { backgroundColor: emptyColor, transform: [{ scale: scaleAnim }] },
+      ]}
+    >
       <Animated.View
         style={[
           StyleSheet.absoluteFill,
           {
-            width: widthAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+            width: widthAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['0%', '100%'],
+            }),
             backgroundColor: fillColor,
             borderRadius: 50,
             shadowColor: fillColor,
             shadowOpacity,
             shadowRadius: 6,
             shadowOffset: { width: 0, height: 0 },
-            elevation: (shadowOpacity as unknown as number),
+            elevation: shadowOpacity as unknown as number,
           },
         ]}
       />
@@ -141,7 +172,9 @@ const Capsule: React.FC<{
   );
 };
 
-// ===== Animated Current Day Circle =====
+// ====================
+// AnimatedFilledDay
+// ====================
 const AnimatedFilledDay: React.FC<{ label: string }> = ({ label }) => {
   const fillAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -155,10 +188,30 @@ const AnimatedFilledDay: React.FC<{ label: string }> = ({ label }) => {
         useNativeDriver: false,
       }),
       Animated.sequence([
-        Animated.timing(scaleAnim, { toValue: 1.12, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(scaleAnim, { toValue: 1.0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(scaleAnim, { toValue: 1.08, duration: 240, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(scaleAnim, { toValue: 1.0, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(scaleAnim, {
+          toValue: 1.12,
+          duration: 260,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 1.0,
+          duration: 320,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 1.08,
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 1.0,
+          duration: 300,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
       ]),
     ]).start();
   }, [fillAnim, scaleAnim]);
@@ -178,118 +231,32 @@ const AnimatedFilledDay: React.FC<{ label: string }> = ({ label }) => {
   );
 };
 
+// ====================
+// Main Component
+// ====================
 type UserProfileNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Goals'>;
 
 const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) => {
-  const { state, dispatch } = useApp();
   const [currentGoal, setCurrentGoal] = useState(goal);
   const [empoweredName, setEmpoweredName] = useState<string | null>(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [loading, setLoading] = useState(false);
-  const pulse = useRef(new Animated.Value(0)).current;
-  const navigation = useNavigation<UserProfileNavigationProp>();
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-
-  // Popup State
   const [showHint, setShowHint] = useState(false);
   const [lastHint, setLastHint] = useState<string | null>(null);
   const [pendingHint, setPendingHint] = useState<string | null>(null);
   const [lastSessionNumber, setLastSessionNumber] = useState<number>(0);
-  const timerState = state.goalTimers[currentGoal.id] || null;
-  const isTimerRunning = Boolean(timerState?.isRunning);
-  const canFinish = timeElapsed >= 5;
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [showCancelPopup, setShowCancelPopup] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState(
+    "Are you sure you want to cancel this session? Progress won't be saved."
+  );
 
-  const onPressIn = () => {
-    Animated.spring(scaleAnim, { toValue: 0.97, useNativeDriver: true, speed: 20, bounciness: 4 }).start();
-  };
-  const onPressOut = () => {
-    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start();
-  };
-
-  useEffect(() => {
-    if (currentGoal.empoweredBy) {
-      userService.getUserName(currentGoal.empoweredBy).then(setEmpoweredName).catch(() => {});
-    }
-  }, [currentGoal.empoweredBy]);
-
-  useEffect(() => {
-    const computeElapsed = () => {
-      if (!timerState) return 0;
-      const base = timerState.elapsedBeforePause || 0;
-      if (timerState.isRunning && timerState.startedAt) {
-        return Math.floor((Date.now() - timerState.startedAt) / 1000) + base;
-      }
-      return base;
-    };
-
-    setTimeElapsed(computeElapsed());
-
-    if (!timerState?.isRunning) {
-      return;
-    }
-
-    const t = setInterval(() => {
-      setTimeElapsed(computeElapsed());
-    }, 1000);
-
-    return () => clearInterval(t);
-  }, [timerState?.isRunning, timerState?.startedAt, timerState?.elapsedBeforePause]);
-
-  const handleStart = async () => {
-    if (isTimerRunning || loading) return;
-
-    const goalId = currentGoal.id;
-    if (!goalId) return;
-
-    setLoading(true);
-    setTimeElapsed(0);
-    setPendingHint(null);
-    dispatch({
-      type: 'START_GOAL_TIMER',
-      payload: {
-        goalId,
-        startedAt: Date.now(),
-        elapsedBeforePause: 0,
-      },
-    });
-
-    try {
-      const gift = await experienceGiftService.getExperienceGiftById(currentGoal.experienceGiftId);
-      const recipientName = await userService.getUserName(currentGoal.userId);
-
-      const totalSessionsDone =
-        (currentGoal.currentCount * currentGoal.sessionsPerWeek) +
-        (currentGoal.weeklyLogDates?.length || 0);
-      const totalSessions = currentGoal.sessionsPerWeek * currentGoal.targetCount;
-      
-      if (totalSessionsDone != totalSessions) {
-        // 🪄 Pre-generate hint now (AI call) but DON'T save to DB yet
-        const hint = await aiHintService.generateHint({
-          goalId,
-          experienceType: gift?.experience?.title || 'experience',
-          sessionNumber: totalSessionsDone + 1,
-          totalSessions,
-          userName: recipientName || undefined,
-        });
-
-        // Store hint only in memory (to show later when finishing)
-        setPendingHint(hint);
-      }
-
-    } catch (err) {
-      console.warn('Hint pre-generation failed:', err);
-      dispatch({ type: 'CLEAR_GOAL_TIMER', payload: { goalId } });
-      Alert.alert('Error', 'Could not start the session timer. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePress = async (g: Goal) => {
-    // @ts-ignore
-    navigation.navigate('Roadmap', { goal: g });
-  };
-
+  const navigation = useNavigation<UserProfileNavigationProp>();
+  const pulse = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const cancelAnim = useRef(new Animated.Value(0)).current;
+  const cancelScale = useRef(new Animated.Value(0.9)).current;
   const handleFinish = async () => {
     if (!isTimerRunning || !canFinish || loading) return;
 
@@ -310,41 +277,43 @@ const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) =
       setCurrentGoal(updated);
 
       const gift = await experienceGiftService.getExperienceGiftById(updated.experienceGiftId);
+      const experience = await experienceService.getExperienceById(gift.experienceId);
       const recipientName = await userService.getUserName(updated.userId);
 
       const totalSessionsDone =
         (updated.currentCount * updated.sessionsPerWeek) + (updated.weeklyLogDates?.length || 0);
 
       setLastSessionNumber(totalSessionsDone);
-      dispatch({ type: 'CLEAR_GOAL_TIMER', payload: { goalId } });
+      
+      // Clear timer state
+      setIsTimerRunning(false);
+      setStartTime(null);
       setTimeElapsed(0);
+      await clearTimerState();
 
       if (updated.isCompleted) {
         await notificationService.createNotification(
           updated.empoweredBy,
           'goal_completed',
-          `🎉 ${recipientName} just earned ${gift.experience.title}`,
+          `🎉 ${recipientName} just earned ${experience.title}`,
           `Goal completed: ${updated.description}`,
           {
             goalId: updated.id,
             giftId: updated.experienceGiftId,
             giverId: updated.empoweredBy,
             recipientId: updated.userId,
-            experienceTitle: gift.experience.title,
+            experienceTitle: experience.title,
           }
         );
         onFinish?.(updated);
         navigation.navigate('Completion', { goal: updated, experienceGift: gift });
       } else {
-        console.log(pendingHint);
-        // save the hint to DB (after session is finished)
         const hintToShow = pendingHint || "Keep going! You're doing great 💪";
        
         if (pendingHint) {
           const hintObj = { session: totalSessionsDone, hint: pendingHint, date: Date.now() };
           await goalService.appendHint(goalId, hintObj);
 
-          // Update local state hints array
           setCurrentGoal((prev) => ({
             ...prev,
             hints: [...(prev.hints || []), hintObj],
@@ -360,13 +329,13 @@ const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) =
           'goal_progress',
           `✅ ${recipientName} made progress on their goal`,
           `This week's progress: ${updated.weeklyCount}/${updated.sessionsPerWeek}
-  Weeks completed: ${updated.currentCount}/${updated.targetCount}`,
+Weeks completed: ${updated.currentCount}/${updated.targetCount}`,
           {
             goalId: updated.id,
             giftId: updated.experienceGiftId,
             giverId: updated.empoweredBy,
             recipientId: updated.userId,
-            experienceTitle: gift.experience.title,
+            experienceTitle: experience.title,
           }
         );
       }
@@ -377,8 +346,153 @@ const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) =
       setLoading(false);
     }
   };
+  
+    const handleStart = async () => {
+      if (isTimerRunning || loading) return;
+  
+      const goalId = currentGoal.id;
+      if (!goalId) return;
+  
+      setLoading(true);
+      const now = Date.now();
+      setStartTime(now);
+      setTimeElapsed(0);
+      setPendingHint(null);
+      setIsTimerRunning(true);
+  
+      try {
+        const gift = await experienceGiftService.getExperienceGiftById(currentGoal.experienceGiftId);
+        const experience = await experienceService.getExperienceById(gift.experienceId);
+        const recipientName = await userService.getUserName(currentGoal.userId);
+  
+        const totalSessionsDone =
+          (currentGoal.currentCount * currentGoal.sessionsPerWeek) +
+          (currentGoal.weeklyLogDates?.length || 0);
+        const totalSessions = currentGoal.sessionsPerWeek * currentGoal.targetCount;
+        
+        if (totalSessionsDone != totalSessions) {
+          const hint = await aiHintService.generateHint({
+            goalId,
+            experienceType: experience?.title || 'experience',
+            sessionNumber: totalSessionsDone + 1,
+            totalSessions,
+            userName: recipientName || undefined,
+          });
+  
+          setPendingHint(hint);
+        }
+  
+      } catch (err) {
+        console.warn('Hint pre-generation failed:', err);
+        setIsTimerRunning(false);
+        setStartTime(null);
+        Alert.alert('Error', 'Could not start the session timer. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Calendar (anchored week)
+  // ========= Helpers & Animations =========
+  const onPressIn = () =>
+    Animated.spring(scaleAnim, { toValue: 0.97, useNativeDriver: true, speed: 20, bounciness: 4 }).start();
+  const onPressOut = () =>
+    Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start();
+
+  const openCancelPopup = () => {
+    setShowCancelPopup(true);
+    Animated.parallel([
+      Animated.timing(cancelAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.spring(cancelScale, { toValue: 1, friction: 5, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const closeCancelPopup = () => {
+    Animated.parallel([
+      Animated.timing(cancelAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+      Animated.timing(cancelScale, { toValue: 0.9, duration: 150, useNativeDriver: true }),
+    ]).start(() => setShowCancelPopup(false));
+  };
+
+  const handleCancel = () => openCancelPopup();
+
+  const cancelSessionInternal = async () => {
+    try {
+      setIsTimerRunning(false);
+      setStartTime(null);
+      setTimeElapsed(0);
+      setPendingHint(null);
+      await clearTimerState();
+    } catch (error) {
+      console.error('Error cancelling session:', error);
+    } finally {
+      closeCancelPopup();
+    }
+  };
+
+  // ========= Timer Persistence =========
+  const loadTimerState = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(TIMER_STORAGE_KEY + currentGoal.id);
+      if (stored) {
+        const timerState = JSON.parse(stored);
+        setIsTimerRunning(true);
+        setStartTime(timerState.startTime);
+        setPendingHint(timerState.pendingHint || null);
+        const elapsed = Math.floor((Date.now() - timerState.startTime) / 1000);
+        setTimeElapsed(elapsed);
+      }
+    } catch (error) {
+      console.error('Error loading timer state:', error);
+    }
+  };
+
+  const saveTimerState = async () => {
+    try {
+      const timerState = { startTime, pendingHint, goalId: currentGoal.id };
+      await AsyncStorage.setItem(TIMER_STORAGE_KEY + currentGoal.id, JSON.stringify(timerState));
+    } catch (error) {
+      console.error('Error saving timer state:', error);
+    }
+  };
+
+  const clearTimerState = async () => {
+    try {
+      await AsyncStorage.removeItem(TIMER_STORAGE_KEY + currentGoal.id);
+    } catch (error) {
+      console.error('Error clearing timer state:', error);
+    }
+  };
+
+  // ========= Effects =========
+  useEffect(() => {
+    loadTimerState();
+  }, [currentGoal.id]);
+
+  useEffect(() => {
+    if (isTimerRunning && startTime) saveTimerState();
+  }, [isTimerRunning, startTime, pendingHint]);
+
+  useEffect(() => {
+    if (!isTimerRunning || !startTime) return;
+    const updateTimer = () => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setTimeElapsed(elapsed);
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [isTimerRunning, startTime]);
+
+  useEffect(() => {
+    if (currentGoal.empoweredBy) {
+      userService.getUserName(currentGoal.empoweredBy).then(setEmpoweredName).catch(() => {});
+    }
+  }, [currentGoal.empoweredBy]);
+
+  // ========= Other Computations =========
+  const canFinish =
+    timeElapsed >= (goal.targetHours || 0) * 3600 + (goal.targetMinutes || 0) * 60;
+
   const weekDates = useMemo(() => {
     const start = currentGoal.weekStartAt ? new Date(currentGoal.weekStartAt) : new Date();
     start.setHours(0, 0, 0, 0);
@@ -389,33 +503,40 @@ const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) =
 
   const weeklyFilled = Math.max(0, currentGoal.weeklyCount || 0);
   const weeklyTotal = Math.max(1, currentGoal.sessionsPerWeek || 1);
-  const overallFilled = Math.max(0, currentGoal.currentCount || 0);
   const overallTotal = Math.max(1, currentGoal.targetCount || 1);
 
-  const renderCapsuleBar = (filled: number, total: number, fillColor: string, emptyColor: string) => {
-    const items = Array.from({ length: Math.max(0, total) }, (_, i) => i < filled);
-    return (
-      <View style={styles.capsuleRow}>
-        {items.map((isFilled, idx) => (
-          <Capsule key={idx} isFilled={isFilled} fillColor={fillColor} emptyColor={emptyColor} />
-        ))}
-      </View>
-    );
-  };
-
-  const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const completedWeeks = useMemo(() => {
+    const finishedThisWeek = currentGoal.weeklyCount >= currentGoal.sessionsPerWeek;
+    const total = currentGoal.targetCount || 1;
+    const base = currentGoal.currentCount || 0;
+    if (currentGoal.isCompleted) return total;
+    return Math.min(base + (finishedThisWeek ? 1 : 0), total);
+  }, [currentGoal]);
 
   const todayIso = isoDay(new Date());
   const alreadyLoggedToday = loggedSet.has(todayIso);
 
+  const formatTime = (s: number) =>
+    `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const handlePress = async (g: Goal) => {
+    // @ts-ignore
+    navigation.navigate('Roadmap', { goal: g });
+  };
+  // ========= UI Rendering =========
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-      <Pressable onPressIn={onPressIn} onPressOut={onPressOut} onPress={() => handlePress(currentGoal)} style={{ borderRadius: 16 }}>
+      {/* Card Press */}
+      <Pressable
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        onPress={() => handlePress(currentGoal)}
+        style={{ borderRadius: 16 }}
+      >
         <View style={styles.card}>
           <Text style={styles.title}>{currentGoal.title}</Text>
           {!!empoweredName && <Text style={styles.empoweredText}>⚡ Empowered by {empoweredName}</Text>}
 
-          {/* Rolling week calendar */}
+          {/* Weekly Calendar */}
           <View style={styles.calendarRow}>
             {weekDates.map((d) => {
               const label = day2(d);
@@ -448,7 +569,7 @@ const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) =
             })}
           </View>
 
-          {/* Weekly Progress */}
+          {/* Progress Bars */}
           <View style={styles.progressBlock}>
             <View style={styles.progressHeader}>
               <Text style={styles.progressLabel}>Sessions this week</Text>
@@ -456,42 +577,87 @@ const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) =
                 {weeklyFilled}/{weeklyTotal}
               </Text>
             </View>
-            {renderCapsuleBar(weeklyFilled, weeklyTotal, '#84b3e9ff', COLORS.grayLight)}
+            <View style={styles.capsuleRow}>
+              {Array.from({ length: weeklyTotal }, (_, i) => (
+                <Capsule
+                  key={i}
+                  isFilled={i < weeklyFilled}
+                  fillColor="#84b3e9ff"
+                  emptyColor={COLORS.grayLight}
+                />
+              ))}
+            </View>
           </View>
 
-          {/* Overall Progress */}
           <View style={styles.progressBlock}>
             <View style={styles.progressHeader}>
               <Text style={styles.progressLabel}>Weeks completed</Text>
               <Text style={styles.progressText}>
-                {overallFilled}/{overallTotal}
+                {completedWeeks}/{overallTotal}
               </Text>
             </View>
-            {renderCapsuleBar(overallFilled, overallTotal, '#84b3e9ff', COLORS.grayLight)}
+            <View style={styles.capsuleRow}>
+              {Array.from({ length: overallTotal }, (_, i) => (
+                <Capsule
+                  key={i}
+                  isFilled={i < completedWeeks}
+                  fillColor="#84b3e9ff"
+                  emptyColor={COLORS.grayLight}
+                />
+              ))}
+            </View>
           </View>
 
-          {/* Timer Section */}
+          {/* Buttons */}
           {!isTimerRunning ? (
-            alreadyLoggedToday && !DEBUG_ALLOW_MULTIPLE_PER_DAY ? (
+            currentGoal.isWeekCompleted && !currentGoal.isCompleted ? (
+              <View style={styles.weekCompleteBox}>
+                <Text style={styles.weekCompleteText}>🎉 You’ve completed this week!</Text>
+                <Text style={styles.weekCompleteSub}>
+                  Next week starts on {formatNextWeekDay(currentGoal.weekStartAt)} 💪
+                </Text>
+              </View>
+            ) : alreadyLoggedToday && !DEBUG_ALLOW_MULTIPLE_PER_DAY ? (
               <View style={styles.disabledStartContainer}>
                 <Text style={styles.disabledStartText}>You already made progress today</Text>
                 <Text style={styles.disabledStartText}>Come back tomorrow for more 💪</Text>
               </View>
             ) : (
-              <TouchableOpacity style={styles.startButton} onPress={handleStart} disabled={loading}>
+              <TouchableOpacity
+                style={styles.startButton}
+                onPress={handleStart}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
                 <Text style={styles.startButtonText}>{loading ? 'Loading...' : 'Start Session'}</Text>
               </TouchableOpacity>
             )
           ) : (
             <View style={styles.timerContainer}>
               <Text style={styles.timerText}>{formatTime(timeElapsed)}</Text>
-              <TouchableOpacity
-                style={[styles.finishButton, canFinish ? styles.finishButtonActive : styles.finishButtonDisabled]}
-                onPress={handleFinish}
-                disabled={!canFinish || loading}
-              >
-                <Text style={styles.finishButtonText}>{canFinish ? 'Finish Session' : 'Complete Session'}</Text>
-              </TouchableOpacity>
+              <View>
+                <TouchableOpacity
+                  style={[
+                    styles.finishButton,
+                    canFinish ? styles.finishButtonActive : styles.finishButtonDisabled,
+                  ]}
+                  onPress={handleFinish}
+                  disabled={!canFinish || loading}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.finishButtonText}>
+                    {canFinish ? 'Finish Session' : 'Finish'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={handleCancel}
+                  disabled={loading}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
         </View>
@@ -505,10 +671,44 @@ const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) =
         totalSessions={overallTotal}
         onClose={() => setShowHint(false)}
       />
+
+      {/* Cancel Popup */}
+      {showCancelPopup && (
+        <Animated.View
+          style={[
+            styles.modalOverlay,
+            { opacity: cancelAnim, transform: [{ scale: cancelScale }] },
+          ]}
+        >
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Cancel Session?</Text>
+            <Text style={styles.modalSubtitle}>{cancelMessage}</Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                onPress={closeCancelPopup}
+                style={[styles.modalButton, styles.cancelButtonPopup]}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.cancelText}>No</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={cancelSessionInternal}
+                style={[styles.modalButton, styles.confirmButton]}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmText}>Yes, cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+      )}
     </Animated.View>
   );
 };
 
+// ====================
+// Styles
+// ====================
 const CIRCLE = 38;
 
 const styles = StyleSheet.create({
@@ -577,6 +777,78 @@ const styles = StyleSheet.create({
   finishButtonActive: { backgroundColor: '#7c3aed' },
   finishButtonDisabled: { backgroundColor: '#9ca3af' },
   finishButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  weekCompleteBox: {
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    alignItems: 'center',
+  },
+  weekCompleteText: {
+    color: '#065F46',
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  weekCompleteSub: { color: '#047857', fontSize: 13, marginTop: 4, textAlign: 'center' },
+  cancelButton: {
+    marginTop: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#b3afafff',
+  },
+  cancelButtonText: { color: '#fff', fontSize: 16, fontWeight: '400', textAlign: 'center' },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    zIndex: 999,
+  },
+  modalBox: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '85%',
+    maxWidth: 360,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    alignItems: 'center',
+  },
+  modalTitle: { fontSize: 20, fontWeight: '700', color: '#4c1d95', marginBottom: 8 },
+  modalSubtitle: {
+    fontSize: 15,
+    color: '#374151',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 10,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  cancelButtonPopup: { backgroundColor: '#f3f4f6' },
+  confirmButton: { backgroundColor: '#7c3aed' },
+  cancelText: { color: '#374151', fontWeight: '600', fontSize: 15 },
+  confirmText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 });
 
 export default DetailedGoalCard;

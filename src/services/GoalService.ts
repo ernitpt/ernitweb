@@ -77,7 +77,7 @@ export class GoalService {
 
   // ===== Debug switch =====
   // Production default = false (one session per day).
-  private DEBUG_ALLOW_MULTIPLE_PER_DAY: boolean = true;
+  private DEBUG_ALLOW_MULTIPLE_PER_DAY: boolean = false;
   setDebug(allowMultiplePerDay: boolean) {
     this.DEBUG_ALLOW_MULTIPLE_PER_DAY = allowMultiplePerDay;
   }

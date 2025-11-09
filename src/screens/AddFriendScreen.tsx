@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   StatusBar,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,6 +19,7 @@ import { friendService } from '../services/FriendService';
 import { useApp } from '../context/AppContext';
 import MainScreen from './MainScreen';
 import { LinearGradient } from 'expo-linear-gradient';
+import { commonStyles } from '../themes/commonStyles';
 
 type AddFriendNavigationProp = NativeStackNavigationProp<RootStackParamList, 'AddFriend'>;
 
@@ -32,6 +34,8 @@ const AddFriendScreen: React.FC = () => {
   const currentUserId = state.user?.id;
   const currentUserName = state.user?.displayName || state.user?.profile?.name || 'User';
   const currentUserProfileImageUrl = state.user?.profile?.profileImageUrl;
+
+  const [imageLoadError, setImageLoadError] = useState(false);
 
   useEffect(() => {
     if (searchTerm.length >= 2) {
@@ -98,16 +102,21 @@ const AddFriendScreen: React.FC = () => {
         onPress={() => handleViewProfile(item.id)}
         activeOpacity={0.7}
       >
-        <Image
-          source={{
-            uri: item.profileImageUrl || `https://via.placeholder.com/50x50/6366f1/ffffff?text=${item.name[0]}`,
-          }}
-          style={styles.profileImage}
-          defaultSource={{ uri: `https://via.placeholder.com/50x50/6366f1/ffffff?text=${item.name[0]}` }}
-        />
+        {item.profileImageUrl && !imageLoadError ? (
+          <Image
+            source={{ uri: item.profileImageUrl }}
+            style={styles.profileImage}
+            onError={() => setImageLoadError(true)}
+          />
+        ) : (
+          <View style={styles.placeholderImage}>
+            <Text style={styles.placeholderText}>
+              {item.name?.[0]?.toUpperCase() || 'U'}
+            </Text>
+          </View>
+        )}
         <View style={styles.userDetails}>
           <Text style={styles.userName}>{item.name}</Text>
-          <Text style={styles.userEmail}>{item.email}</Text>
           {item.country && (
             <Text style={styles.userCountry}>{item.country}</Text>
           )}
@@ -139,9 +148,17 @@ const headerColors = ['#462088ff', '#235c9eff'] as const;
 
   return (
     <MainScreen activeRoute="Profile">
-      <LinearGradient colors={headerColors} style={styles.gradientHeader}>
+      <LinearGradient colors={headerColors} style={commonStyles.gradientHeader}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Add Friend</Text>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backButtonHero}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.backIcon}>‹</Text>
+          </TouchableOpacity>
+
+          <Text style={[commonStyles.headerTitle, { marginLeft: 8 }]}>Add Friend</Text>
         </View>
       </LinearGradient>
 
@@ -209,18 +226,14 @@ const styles = StyleSheet.create({
     paddingTop: 28,
   },
   header: {
-    paddingHorizontal: 24,
-    paddingTop: 34,
     paddingBottom: 10,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
   },
   headerTitle: {
     fontSize: 26,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 4,
   },
   backButton: {
     marginRight: 16,
@@ -361,6 +374,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  backButtonHero: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  backIcon: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '600',
+  },
+  placeholderImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 28,
+    marginRight: 12,
+    backgroundColor: '#e0e7ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: { color: '#4f46e5', fontSize: 20, fontWeight: '700' },
+
 });
 
 export default AddFriendScreen;

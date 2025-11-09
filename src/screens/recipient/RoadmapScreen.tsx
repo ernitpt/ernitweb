@@ -79,7 +79,7 @@ const RoadmapScreen = () => {
         }}
       >
         <Text style={{ fontWeight: '700', color: '#111827' }}>
-          Session {hint.sessionNumber} — {fmtDateTime(hint.date)}
+          {fmtDateTime(hint.date)} {/*Session {hint.sessionNumber} — */}
         </Text>
         <Text style={{ marginTop: 6, color: '#111827' }}>{hint.hint}</Text>
       </Animated.View>

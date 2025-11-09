@@ -43,13 +43,11 @@ export class FriendService {
         const profile = userData.profile || {};
         const displayName = (userData.displayName || '').toLowerCase();
         const name = (profile.name || '').toLowerCase();
-        const email = (userData.email || '').toLowerCase();
         const country = (profile.country || '').toLowerCase();
 
         const matches = 
           displayName.includes(lowerSearch) ||
           name.includes(lowerSearch) ||
-          email.includes(lowerSearch) ||
           country.includes(lowerSearch);
 
         if (matches) {

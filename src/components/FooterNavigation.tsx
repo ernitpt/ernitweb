@@ -12,13 +12,13 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import HomeIcon from '../assets/icons/home.svg';
-import HomeIconActive from '../assets/icons/home_active.svg';
+import HomeIconActive from '../assets/icons/HomeActive';
 import BellIcon from '../assets/icons/notifications.svg';
-import BellIconActive from '../assets/icons/notifications_active.svg';
+import BellIconActive from '../assets/icons/NotificationsActive';
 import GoalsIcon from '../assets/icons/goals.svg';
-import GoalsIconActive from '../assets/icons/goals_active.svg';
+import GoalsIconActive from '../assets/icons/GoalsActive';
 import ProfileIcon from '../assets/icons/profile.svg';
-import ProfileIconActive from '../assets/icons/profile_active.svg';
+import ProfileIconActive from '../assets/icons/ProfileActive';
 import MenuIcon from '../assets/icons/sidemenu.svg';
 import { notificationService } from '../services/NotificationService';
 import { useApp } from '../context/AppContext';
@@ -150,9 +150,12 @@ const FooterNavigation: React.FC<FooterNavigationProps> = ({
             },
           ]}
         >
-          <Animated.View style={{ transform: [{ rotate: iconRotate }] }}>
-            <SelectedIcon width={24} height={24} />
-          </Animated.View>
+          {/* 👇 FIX: wrap icon in overflow-visible container */}
+          <View style={styles.iconWrapper}>
+            <Animated.View style={{ transform: [{ rotate: iconRotate }] }}>
+              <SelectedIcon width={26} height={26} />
+            </Animated.View>
+          </View>
 
           {badgeCount !== undefined && badgeCount > 0 && (
             <View style={styles.badge}>
@@ -170,7 +173,6 @@ const FooterNavigation: React.FC<FooterNavigationProps> = ({
     );
   };
 
-  // 🧩 Fixed container height — never changes
   const footerHeight = 70;
   const safeAreaSpacer = Platform.OS === 'ios' ? insets.bottom : 0;
 
@@ -227,7 +229,6 @@ const FooterNavigation: React.FC<FooterNavigationProps> = ({
         </View>
       </View>
 
-      {/* 👇 Safe spacer for iPhone home indicator */}
       {safeAreaSpacer > 0 && (
         <View style={{ height: safeAreaSpacer, backgroundColor: '#fff' }} />
       )}
@@ -271,6 +272,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     minWidth: 64,
     position: 'relative',
+    overflow: 'visible', // ✅ allow icon gradient edges
+  },
+  iconWrapper: {
+    overflow: 'visible', // ✅ critical fix for SVGs disappearing
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   navLabel: {
     fontSize: 12,

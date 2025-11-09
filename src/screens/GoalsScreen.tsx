@@ -1,7 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Alert, 
-  FlatList,
-  ActivityIndicator, } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  Alert, 
+  FlatList, 
+  ActivityIndicator,
+  Animated,
+  TouchableOpacity,
+  Image,
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -74,6 +82,22 @@ const GoalsScreen: React.FC =  () => {
     return () => unsubscribe();
   }, [userId]);
 
+  const fabAnim = useRef(new Animated.Value(50)).current; // starts 50px below
+  const fabOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(fabAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fabOpacity, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
 
   const handleFinishGoal = async (goal: Goal) => {
@@ -135,11 +159,65 @@ const GoalsScreen: React.FC =  () => {
           }
         />
       )}
-    </MainScreen>
-  );
-};
+
+    {/* ---------- FLOATING REDEEM COUPON BUTTON ---------- */}
+    <Animated.View
+      style={[
+        styles.fabContainer,
+        {
+          transform: [{ translateY: fabAnim }],
+          opacity: fabOpacity,
+        },
+      ]}
+    >
+      <TouchableOpacity
+        style={styles.fab}
+        activeOpacity={0.85}
+        onPress={() => navigation.navigate('RecipientFlow', { screen: 'CouponEntry' })}
+      >
+        <Image
+          source={require('../assets/icon.png')}
+          style={styles.fabIcon}
+          resizeMode="contain"
+        />
+        <Text style={styles.fabText}>Redeem your Ernit</Text>
+      </TouchableOpacity>
+    </Animated.View>
+
+        </MainScreen>
+      );
+    };
 
 const styles = StyleSheet.create({
+    fabContainer: {
+      position: 'absolute',
+      bottom: 30,
+      right: 24,
+    },
+    fab: {
+      backgroundColor: '#8b5cf6',
+      borderRadius: 50,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
+    },
+    fabIcon: {
+      width: 28,
+      height: 28,
+      marginRight: 10,
+    },
+    fabText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '700',
+    },
+
   gradientHeader: {
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
@@ -149,7 +227,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 34,
+    // paddingTop: 34,
     paddingBottom: 10,
   },
   headerTitle: {

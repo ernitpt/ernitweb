@@ -12,8 +12,8 @@ import { userService } from '../services/userService';
 import LandingScreen from '../screens/LandingScreen';
 import AuthScreen from '../screens/AuthScreen';
 import CategorySelectionScreen from '../screens/giver/CategorySelectionScreen';
-import ExperienceListScreen from '../screens/giver/ExperienceListScreen';
-import ExperienceDetailsScreen from '../screens/giver/ExperienceDetailsScreen';
+import ExperienceDetailsScreen from '../screens/giver/ExperienceDetailsScreen.web';
+import ExperienceCheckoutScreen from '../screens/giver/ExperienceCheckoutScreen';
 import ConfirmationScreen from '../screens/giver/ConfirmationScreen';
 import CouponEntryScreen from '../screens/recipient/CouponEntryScreen';
 import GoalSettingScreen from '../screens/recipient/GoalSettingScreen';
@@ -28,9 +28,9 @@ import FriendProfileScreen from '../screens/FriendProfileScreen';
 import FriendsListScreen from '../screens/FriendsListScreen';
 import PurchasedGiftsScreen from '../screens/PurchasedGiftsScreen';
 
-const RootStack = createNativeStackNavigator<RootStackParamList>();
-const GiverStack = createNativeStackNavigator<GiverStackParamList>();
-const RecipientStack = createNativeStackNavigator<RecipientStackParamList>();
+const RootStack = createNativeStackNavigator<RootStackParamList>() as any;
+const GiverStack = createNativeStackNavigator<GiverStackParamList>() as any;
+const RecipientStack = createNativeStackNavigator<RecipientStackParamList>() as any;
 
 // Giver Flow Navigator
 const GiverNavigator = () => {
@@ -42,9 +42,8 @@ const GiverNavigator = () => {
       }}
     >
       <GiverStack.Screen name="CategorySelection" component={CategorySelectionScreen} />
-      <GiverStack.Screen name="ExperienceList" component={ExperienceListScreen} />
       <GiverStack.Screen name="ExperienceDetails" component={ExperienceDetailsScreen} />
-      {/* <GiverStack.Screen name="Main" component={CategorySelectionScreen} /> */}
+      <GiverStack.Screen name="ExperienceCheckout" component={ExperienceCheckoutScreen} />
       <GiverStack.Screen name="Confirmation" component={ConfirmationScreen} />
     </GiverStack.Navigator>
   );
@@ -152,6 +151,7 @@ const AppNavigator = () => {
             <RootStack.Screen name="GoalDetail" component={GoalDetailScreen} />
             <RootStack.Screen name="Roadmap" component={RoadmapScreen} />
             <RootStack.Screen name="ExperienceDetails" component={ExperienceDetailsScreen} />
+            <RootStack.Screen name="ExperienceCheckout" component={ExperienceCheckoutScreen} />
             <RootStack.Screen name="RecipientFlow" component={RecipientNavigator} />
             <RootStack.Screen name="Completion" component={CompletionScreen} />
             <RootStack.Screen name="Notification" component={NotificationsScreen} />

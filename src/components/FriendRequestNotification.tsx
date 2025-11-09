@@ -11,6 +11,7 @@ import {
 import { Notification } from '../types';
 import { friendService } from '../services/FriendService';
 import { notificationService } from '../services/NotificationService';
+import { Timestamp } from 'firebase/firestore';
 
 interface FriendRequestNotificationProps {
   notification: Notification;
@@ -22,6 +23,7 @@ const FriendRequestNotification: React.FC<FriendRequestNotificationProps> = ({
   onRequestHandled,
 }) => {
   const [isHandling, setIsHandling] = useState(false);
+  const [imageLoadError, setImageLoadError] = useState(false);
 
   const handleAccept = async () => {
     if (!notification.data?.friendRequestId) return;
@@ -67,25 +69,6 @@ const FriendRequestNotification: React.FC<FriendRequestNotificationProps> = ({
     }
   };
 
-  const handleClear = async () => {
-    try {
-      setIsHandling(true);
-      
-      // Simply delete the notification without handling the request
-      if (notification.id) {
-        await notificationService.deleteNotification(notification.id);
-      }
-      
-      Alert.alert('Cleared', 'Notification has been cleared.');
-      onRequestHandled();
-    } catch (error) {
-      console.error('Error clearing notification:', error);
-      Alert.alert('Error', 'Failed to clear notification. Please try again.');
-    } finally {
-      setIsHandling(false);
-    }
-  };
-
   const senderName = notification.data?.senderName || 'Unknown User';
   const senderCountry = notification.data?.senderCountry || '';
   const senderProfileImageUrl = notification.data?.senderProfileImageUrl;
@@ -94,13 +77,19 @@ const FriendRequestNotification: React.FC<FriendRequestNotificationProps> = ({
     <View style={styles.container}>
       <View style={styles.header}>
         <View style={styles.userInfo}>
-        <Image
-          source={{
-            uri: senderProfileImageUrl || `https://via.placeholder.com/40x40/6366f1/ffffff?text=${senderName[0]}`,
-          }}
-          style={styles.profileImage}
-          defaultSource={{ uri: `https://via.placeholder.com/40x40/6366f1/ffffff?text=${senderName[0]}` }}
-        />
+        {senderProfileImageUrl && !imageLoadError ? (
+          <Image
+            source={{ uri: senderProfileImageUrl }}
+            style={styles.profileImage}
+            onError={() => setImageLoadError(true)}
+          />
+        ) : (
+          <View style={styles.placeholderImage}>
+            <Text style={styles.placeholderText}>
+              {senderName?.[0]?.toUpperCase() || 'U'}
+            </Text>
+          </View>
+        )}
           <View style={styles.userDetails}>
             <Text style={styles.userName}>{senderName}</Text>
             {senderCountry && (
@@ -109,7 +98,7 @@ const FriendRequestNotification: React.FC<FriendRequestNotificationProps> = ({
           </View>
         </View>
         <Text style={styles.timestamp}>
-          {new Date(notification.createdAt).toLocaleDateString()}
+          {new Date(notification.createdAt instanceof Timestamp ? notification.createdAt.toDate() : notification.createdAt).toLocaleDateString()}
         </Text>
       </View>
 
@@ -140,16 +129,6 @@ const FriendRequestNotification: React.FC<FriendRequestNotificationProps> = ({
           ) : (
             <Text style={styles.acceptButtonText}>Accept</Text>
           )}
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.clearButtonContainer}>
-        <TouchableOpacity
-          style={styles.clearButton}
-          onPress={handleClear}
-          disabled={isHandling}
-        >
-          <Text style={styles.clearButtonText}>Clear</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -213,48 +192,45 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 32,
   },
   button: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    // minHeight: 24,
   },
   acceptButton: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#abd8b2ff',
+    marginRight: 26
   },
   acceptButtonText: {
-    color: '#ffffff',
+    color: '#3e802aff',
     fontSize: 14,
     fontWeight: '600',
   },
   declineButton: {
-    backgroundColor: '#ef4444',
+    backgroundColor: '#ddb1b1ff',
+    marginLeft: 26
   },
   declineButtonText: {
-    color: '#ffffff',
+    color: '#9b2929ff',
     fontSize: 14,
     fontWeight: '600',
   },
-  clearButtonContainer: {
-    marginTop: 12,
+  placeholderImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 28,
+    marginRight: 12,
+    backgroundColor: '#e0e7ff',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  clearButton: {
-    backgroundColor: '#6b7280',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  clearButtonText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '500',
-  },
+  placeholderText: { color: '#4f46e5', fontSize: 20, fontWeight: '700' },
+
 });
 
 export default FriendRequestNotification;

@@ -1,5 +1,5 @@
 // screens/Recipient/GoalSettingScreen.tsx
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -31,7 +31,7 @@ import { db } from '../../services/firebase';
 import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ActivityIndicator } from 'react-native';
-
+import { experienceService } from '../../services/ExperienceService';
 
 type NavProp = NativeStackNavigationProp<RecipientStackParamList, 'GoalSetting'>;
 
@@ -63,7 +63,6 @@ const GoalSettingScreen = () => {
   const [showSessionsWarning, setShowSessionsWarning] = useState(false);
   const [showTimeWarning, setShowTimeWarning] = useState(false);
 
-
   const sanitizeNumericInput = (text: string) => text.replace(/[^0-9]/g, '');
 
   const updateGiftStatus = async (experienceGiftId: string) => {
@@ -77,7 +76,20 @@ const GoalSettingScreen = () => {
       console.error('updateGiftStatus error', e);
     }
   };
+  const [experience, setExperience] = useState<any>(null);
 
+  useEffect(() => {
+    const fetchExperience = async () => {
+      try {
+        const exp = await experienceService.getExperienceById(experienceGift.experienceId);
+        setExperience(exp);
+      } catch (error) {
+        console.error("Error fetching experience:", error);
+        Alert.alert("Error", "Could not load experience details.");
+      }
+    };
+    fetchExperience();
+  }, [experienceGift.experienceId]);
   // 1. Trigger modal first
   const handleNext = () => {
     const finalCategory =
@@ -147,7 +159,7 @@ const GoalSettingScreen = () => {
         isActive: true,
         isCompleted: false,
         isRevealed: false,
-        location: experienceGift.experience.location || 'Unknown location',
+        location: experience.location || 'Unknown location',
         targetHours: hoursNum,
         targetMinutes: minutesNum,
         segments: [],
@@ -162,14 +174,14 @@ const GoalSettingScreen = () => {
       await notificationService.createNotification(
         goalData.empoweredBy,
         'goal_set',
-        `🎯 ${recipientName} set a new goal for ${experienceGift.experience.title}`,
+        `🎯 ${recipientName} set a new goal for ${experience.title}`,
         `${recipientName} set the following goal: ${goalData.description}`,
         {
           giftId: goalData.experienceGiftId,
           goalId: goal.id,
           giverId: goalData.empoweredBy,
           recipientId: goalData.userId,
-          experienceTitle: experienceGift.experience.title,
+          experienceTitle: experience.title,
         }
       );
 
@@ -305,23 +317,25 @@ const GoalSettingScreen = () => {
           <Text style={styles.sectionTitle}>Total Duration</Text>
           <Text style={styles.sectionDescription}>How long will you work on this goal?</Text>
           <View style={styles.row}>
-            <TextInput
-              style={[styles.input, { flex: 1, marginRight: 8 }, showDurationWarning && { borderColor: '#d48a1b' }] }
-              placeholder="Total"
-              value={duration}
-              onChangeText={(t) => {
-                const clean = sanitizeNumericInput(t);
-                const num = parseInt(clean || '0');
-                setDuration(clean);
+            <View style={{ flex: 1 }}>
+              <TextInput
+                style={[styles.input, { flex: 1, marginRight: 8 }, showDurationWarning && { borderColor: '#d48a1b' }] }
+                placeholder="Total"
+                value={duration}
+                onChangeText={(t) => {
+                  const clean = sanitizeNumericInput(t);
+                  const num = parseInt(clean || '0');
+                  setDuration(clean);
 
-                if (durationUnit === 'weeks' && num > 2) {
-                  setShowDurationWarning(true);
-                } else {
-                  setShowDurationWarning(false);
-                }
-              }}
-              keyboardType="numeric"
-            />
+                  if (durationUnit === 'weeks' && num > 2) {
+                    setShowDurationWarning(true);
+                  } else {
+                    setShowDurationWarning(false);
+                  }
+                }}
+                keyboardType="numeric"
+              />
+            </View>
             <View style={[styles.dropdownContainer, { flex: 1 }]}>
               <Picker
                 selectedValue={durationUnit}
@@ -391,53 +405,53 @@ const GoalSettingScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Time Commitment</Text>
           <Text style={styles.sectionDescription}>How long is each session?</Text>
-          <View style={styles.timeRow}>
-            <TextInput
-              style={[
-                styles.timeInput,
-                showTimeWarning && { borderColor: '#d48a1b' },
-              ]}
-              placeholder="1"
-              value={hours}
-              onChangeText={(t) => {
-                const clean = sanitizeNumericInput(t);
-                const h = parseInt(clean || '0');
-                let m = parseInt(minutes || '0');
-                setHours(clean);
+          <View style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <TextInput
+                style={[styles.input, showTimeWarning && { borderColor: '#d48a1b' }]}
+                placeholder="1"
+                value={hours}
+                onChangeText={(t) => {
+                  const clean = sanitizeNumericInput(t);
+                  const h = parseInt(clean || '0');
+                  let m = parseInt(minutes || '0');
+                  setHours(clean);
 
-                if (h > 3 || (h === 3 && m > 0)) setShowTimeWarning(true);
-                else setShowTimeWarning(false);
+                  if (h > 3 || (h === 3 && m > 0)) setShowTimeWarning(true);
+                  else setShowTimeWarning(false);
 
-                // Clamp minutes to 0–59
-                if (m > 59) m = 59;
-                setMinutes(m.toString());
+                  // Clamp minutes to 0–59
+                  if (m > 59) m = 59;
+                  setMinutes(m.toString());
 
+                }}
+                keyboardType="numeric"
+              />
+            </View>
+            <Text style={[styles.timeLabel, { margin: 12 }]}>Hour</Text>
+            <View style={{ flex: 1 }}>
+              <TextInput
+                style={styles.input}
+                placeholder="0"
+                value={minutes}
+                onChangeText={(t) => {
+                  const clean = sanitizeNumericInput(t);
+                  const h = parseInt(hours || '0');
+                  let m = parseInt(clean || '0');
+                  setMinutes(clean);
 
-              }}
-              keyboardType="numeric"
-            />
-            <Text style={styles.timeLabel}>Hour</Text>
-            <TextInput
-              style={styles.timeInput}
-              placeholder="30"
-              value={minutes}
-              onChangeText={(t) => {
-                const clean = sanitizeNumericInput(t);
-                const h = parseInt(hours || '0');
-                let m = parseInt(clean || '0');
-                setMinutes(clean);
+                  if (h > 3 || (h === 3 && m > 0)) setShowTimeWarning(true);
+                  else setShowTimeWarning(false);
+                  
+                  // Clamp minutes to 0–59
+                  if (m > 59) m = 59;
+                  setMinutes(m.toString());
 
-                if (h > 3 || (h === 3 && m > 0)) setShowTimeWarning(true);
-                else setShowTimeWarning(false);
-                
-                // Clamp minutes to 0–59
-                if (m > 59) m = 59;
-                setMinutes(m.toString());
-
-              }}
-              keyboardType="numeric"
-            />
-            <Text style={styles.timeLabel}>Min</Text>
+                }}
+                keyboardType="numeric"
+              />
+            </View>
+            <Text style={[styles.timeLabel, { marginLeft: 12 }]}>Min</Text>
           </View>
 
           {showTimeWarning && (
@@ -542,7 +556,7 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     paddingTop: 28,
   },
-  header: { paddingHorizontal: 24, paddingTop: 34, paddingBottom: 10 },
+  header: { paddingHorizontal: 24, paddingBottom: 10 },
   headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
   headerSubtitle: {
     fontSize: 15,
@@ -582,18 +596,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
 
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  timeInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: '#ffffff',
+  timeLabel: {
+    fontSize: 15,
+    color: '#374151',
+    alignSelf: 'center',
   },
-  timeLabel: { fontSize: 16, color: '#374151', alignSelf: 'center' },
 
   row: { flexDirection: 'row', alignItems: 'center' },
  
@@ -604,15 +611,22 @@ const styles = StyleSheet.create({
   },
 
   dropdownContainer: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#ffffff',
     height: 48,
     justifyContent: 'center',
   },
-  picker: { height: Platform.OS === 'ios' ? 48 : 50, width: '100%' },
+  picker: {
+    height: Platform.OS === 'ios' ? 48 : 50,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 12,
+    color: '#374151',
+    fontSize: 14,
+    backgroundColor: '#fff',
+  },
 
   summaryCard: { backgroundColor: '#ede9fe', padding: 16, borderRadius: 12, marginBottom: 20 },
   summaryTitle: { fontSize: 14, fontWeight: '500', color: '#7c3aed', marginBottom: 4 },

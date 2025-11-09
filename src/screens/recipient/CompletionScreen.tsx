@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,14 @@ import {
   Alert,
   StyleSheet,
   ActivityIndicator,
+  Animated,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Trophy, Gift, Copy, CheckCircle, Sparkles, Ticket } from 'lucide-react-native';
 import {
   RecipientStackParamList,
   Goal,
@@ -21,9 +24,10 @@ import {
 } from '../../types';
 import { useApp } from '../../context/AppContext';
 import MainScreen from '../MainScreen';
-import { collection, doc, setDoc, serverTimestamp, getDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../services/firebase';
 import { goalService } from '../../services/GoalService';
+import { experienceService } from '../../services/ExperienceService';
 
 type CompletionNavigationProp = NativeStackNavigationProp<
   RecipientStackParamList,
@@ -40,7 +44,11 @@ const CompletionScreen = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Safely parse params (serialized before navigation)
+  // Animation refs
+  const confettiAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
   const { goal: rawGoal, experienceGift: rawGift } = route.params as {
     goal: any;
     experienceGift: any;
@@ -53,7 +61,6 @@ const CompletionScreen = () => {
     return isNaN(date.getTime()) ? undefined : date;
   };
 
-  // Rehydrate goal
   const goal: Goal = {
     ...rawGoal,
     startDate: toDate(rawGoal.startDate)!,
@@ -63,7 +70,6 @@ const CompletionScreen = () => {
     completedAt: toDate(rawGoal.completedAt),
   };
 
-  // Rehydrate experienceGift
   const experienceGift: ExperienceGift = {
     ...rawGift,
     createdAt: toDate(rawGift.createdAt)!,
@@ -72,20 +78,52 @@ const CompletionScreen = () => {
     completedAt: toDate(rawGift.completedAt),
   };
 
-  // Fetch existing coupon on mount
+
+  const [experience, setExperience] = useState<any>(null);
+
   useEffect(() => {
+    const fetchExperience = async () => {
+      try {
+        const exp = await experienceService.getExperienceById(experienceGift.experienceId);
+        setExperience(exp);
+      } catch (error) {
+        console.error("Error fetching experience:", error);
+        Alert.alert("Error", "Could not load experience details.");
+      }
+    };
+    fetchExperience();
+  }, [experienceGift.experienceId]);
+
+  useEffect(() => {
+    // Success animations
+    Animated.parallel([
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.timing(confettiAnim, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
     fetchExistingCoupon();
   }, []);
 
   const fetchExistingCoupon = async () => {
     try {
       setIsLoading(true);
-
-      // ✅ Check goalService first
       const existingCode = await goalService.getCouponCode(goal.id);
       if (existingCode) {
         setCouponCode(existingCode);
-        return;
       }
     } catch (error) {
       console.error('Error fetching existing coupon:', error);
@@ -94,8 +132,6 @@ const CompletionScreen = () => {
     }
   };
 
-
-  // Generate a random 8-character coupon code
   const generateUniqueCode = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     return Array.from({ length: 8 }, () =>
@@ -103,24 +139,24 @@ const CompletionScreen = () => {
     ).join('');
   };
 
-  // Handle redeem (generate + upload)
   const handleRedeemNow = async () => {
     if (isGenerating) return;
     
     try {
       setIsGenerating(true);
       
-      const partnerId = experienceGift?.partnerId || experienceGift?.experience?.partnerId;
+      const partnerId = experienceGift?.partnerId || experience?.partnerId;
 
       if (!partnerId) {
         Alert.alert('Error', 'This experience is missing a partner ID.');
-        console.error('Missing partnerId in experienceGift:', experienceGift);
         return;
       }
 
       const newCouponCode = generateUniqueCode();
       const userId = goal.userId;
-      const validUntil = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30); // valid 30 days
+      const validUntil = new Date();
+      validUntil.setFullYear(validUntil.getFullYear() + 1);
+
 
       const coupon: PartnerCoupon = {
         code: newCouponCode,
@@ -130,7 +166,6 @@ const CompletionScreen = () => {
         partnerId,
       };
 
-      // Save to partner's coupons subcollection
       const partnerCouponRef = doc(
         collection(db, `partnerUsers/${partnerId}/coupons`),
         newCouponCode
@@ -141,13 +176,12 @@ const CompletionScreen = () => {
         createdAt: serverTimestamp(),
       });
 
-      // ✅ Store coupon code in goal document via service
       await goalService.saveCouponCode(goal.id, newCouponCode);
 
       setCouponCode(newCouponCode);
       Alert.alert(
-        '🎉 Coupon Created',
-        `Your coupon code is ready! You can copy it below.`
+        '✓ Success',
+        'Your coupon code is ready!'
       );
     } catch (error) {
       console.error('Error creating user coupon:', error);
@@ -157,7 +191,6 @@ const CompletionScreen = () => {
     }
   };
 
-  // Copy coupon to clipboard
   const handleCopy = async () => {
     if (!couponCode) return;
     await Clipboard.setStringAsync(couponCode);
@@ -165,258 +198,431 @@ const CompletionScreen = () => {
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  const getCategoryTitle = (category: string) => {
-    const map = {
-      adventure: 'Adventure',
-      relaxation: 'Relaxation',
-      'food-culture': 'Food & Culture',
-      'romantic-getaway': 'Romantic Getaway',
-      'foreign-trip': 'Foreign Trip',
-      entertainment: 'Entertainment',
-    };
-    return map[category as keyof typeof map] || category;
-  };
+  const experienceImage = experience
+  ? Array.isArray(experience.imageUrl)
+    ? experience.imageUrl[0]
+    : experience.imageUrl
+  : null;
 
-  const formatDeliveryDate = (date: any) => {
-    if (!date) return 'N/A';
-    if (date?.seconds) date = new Date(date.seconds * 1000);
-    const jsDate = date instanceof Date ? date : new Date(date);
-    return jsDate.toLocaleDateString('en-US', {
-      weekday: 'short',
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
+  const totalSessions = goal.sessionsPerWeek * goal.targetCount;
 
   return (
     <MainScreen activeRoute="Goals">
       <StatusBar style="light" />
-      <ScrollView style={styles.container}>
-        {/* 🎉 Success Header */}
-        <View style={styles.header}>
-          <View style={styles.iconContainer}>
-            <Text style={styles.icon}>🎉</Text>
-          </View>
-          <Text style={styles.headerTitle}>Congratulations!</Text>
-          <Text style={styles.headerSubtitle}>
-            You've completed your goal and unlocked your reward experience!
-          </Text>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* Hero Section with Animation */}
+        <View style={styles.heroSection}>
+          <Animated.View
+            style={[
+              styles.trophyContainer,
+              {
+                transform: [{ scale: scaleAnim }],
+                opacity: fadeAnim,
+              },
+            ]}
+          >
+            <Trophy color="#fbbf24" size={64} strokeWidth={2} />
+          </Animated.View>
+          
+          <Animated.View style={{ opacity: fadeAnim }}>
+            <Text style={styles.heroTitle}>Goal Completed!</Text>
+            <Text style={styles.heroSubtitle}>
+              You did it! Your reward is now unlocked 🎉
+            </Text>
+          </Animated.View>
         </View>
 
-        {/* 🏆 Goal Summary */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Goal Completed</Text>
+        {/* Stats Card */}
+        <View style={styles.statsCard}>
+          <View style={styles.statsHeader}>
+            <CheckCircle color="#10b981" size={24} />
+            <Text style={styles.statsTitle}>Your Achievement</Text>
+          </View>
+          
           <Text style={styles.goalTitle}>{goal.title}</Text>
-          <Text style={styles.goalDescription}>{goal.description}</Text>
-
-          <View style={styles.statsContainer}>
-            <View style={styles.statRow}>
-              <Text style={styles.statLabel}>Total Sessions Completed:</Text>
-              <Text style={styles.statValue}>
-                {goal.sessionsPerWeek * goal.targetCount} /{' '}
-                {goal.sessionsPerWeek * goal.targetCount}
-              </Text>
-            </View>
+          <Text style={styles.goalDesc}>{goal.description}</Text>
+          
+          <View style={styles.statsBadge}>
+            <Sparkles color="#fbbf24" size={20} />
+            <Text style={styles.statsNumber}>{totalSessions}</Text>
+            <Text style={styles.statsLabel}>Sessions Completed</Text>
           </View>
         </View>
 
-        {/* 🎁 Experience Unlocked */}
-        <View style={styles.card}>
-          <Text style={styles.experienceHeader}>🎁 Your Unlocked Experience</Text>
+        {/* Experience Reveal */}
+        <View style={styles.experienceCard}>
+          <View style={styles.experienceHeader}>
+            <Gift color="#8b5cf6" size={24} />
+            <Text style={styles.experienceHeaderText}>Your Reward</Text>
+          </View>
+          
           <Image
-            source={{ uri: experienceGift.experience.imageUrl }}
+            source={{ uri: experienceImage }}
             style={styles.experienceImage}
             resizeMode="cover"
           />
           <View style={styles.experienceContent}>
-            <Text style={styles.experienceTitle}>
-              {experienceGift.experience.title}
-            </Text>
-            <Text style={styles.categoryBadge}>
-              {getCategoryTitle(experienceGift.experience.category)}
-            </Text>
-            <Text style={styles.experienceDescription}>
-              {experienceGift.experience.description}
-            </Text>
+            {experience ? (
+              <>
+                <Text style={styles.experienceTitle}>{experience.title}</Text>
+                {experience.subtitle && (
+                  <Text style={styles.experienceSubtitle}>{experience.subtitle}</Text>
+                )}
+                <Text style={styles.experienceDescription}>{experience.description}</Text>
+              </>
+            ) : (
+              <ActivityIndicator size="small" color="#8b5cf6" />
+            )}
           </View>
         </View>
 
-        {/* 📋 Next Steps */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Next Steps</Text>
-          <Text style={[styles.stepText, { marginBottom: 16  }]}>
-            Contact your experience provider and share your coupon code.
+        {/* Coupon Section */}
+        <View style={styles.couponSection}>
+          <View style={styles.couponHeader}>
+            <Ticket color="#8b5cf6" size={24} />
+            <Text style={styles.couponHeaderText}>Redeem Your Experience</Text>
+          </View>
+          
+          <Text style={styles.couponInstructions}>
+            Show this code to the experience provider to claim your reward
           </Text>
 
           {isLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#7C3AED" />
-              <Text style={styles.loadingText}>Loading coupon...</Text>
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="large" color="#8b5cf6" />
+              <Text style={styles.loadingText}>Loading your coupon...</Text>
             </View>
           ) : couponCode ? (
             <View>
-              <View style={styles.couponContainer}>
-                <Text style={styles.couponCode}>{couponCode}</Text>
+              <View style={styles.couponCard}>
+                <View style={styles.couponCodeBox}>
+                  <Text style={styles.couponCode}>{couponCode}</Text>
+                </View>
+                
                 <TouchableOpacity
                   style={styles.copyButton}
                   onPress={handleCopy}
-                  activeOpacity={0.8}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.copyButtonText}>
-                    {isCopied ? 'Copied!' : 'Copy'}
+                  <Copy color={isCopied ? "#10b981" : "#8b5cf6"} size={20} />
+                  <Text style={[styles.copyText, isCopied && styles.copiedText]}>
+                    {isCopied ? 'Copied!' : 'Copy Code'}
                   </Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.couponNote}>
-                💡 Save this code! You'll need it to redeem your experience.
-              </Text>
+              
+              <View style={styles.validityBox}>
+                <Text style={styles.validityText}>
+                  ✓ Valid for a year from generation
+                </Text>
+              </View>
             </View>
           ) : (
             <TouchableOpacity
               onPress={handleRedeemNow}
-              style={[styles.primaryButton, isGenerating && styles.disabledButton]}
+              style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]}
               disabled={isGenerating}
+              activeOpacity={0.8}
             >
-              <Text style={styles.primaryButtonText}>
-                {isGenerating ? 'Generating...' : 'Generate Coupon'}
-              </Text>
+              {isGenerating ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ticket color="#fff" size={20} />
+                  <Text style={styles.generateButtonText}>Generate Coupon Code</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
         </View>
 
-        {/* 🚪 Close Button */}
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            onPress={() => navigation.reset({
-              index: 0,
-              routes: [
-                { name: 'Goals' },
-              ],
-            })}
-            style={styles.secondaryButton}
-          >
-            <Text style={styles.secondaryButtonText}>Close</Text>
-          </TouchableOpacity>
-        </View>
+        <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Fixed Bottom Button */}
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          style={styles.doneButton}
+          onPress={() => navigation.reset({
+            index: 0,
+            routes: [{ name: 'Goals' }],
+          })}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.doneButtonText}>Back to Goals</Text>
+        </TouchableOpacity>
+      </View>
     </MainScreen>
   );
 };
 
-// 🎨 Styles
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
-  header: {
-    backgroundColor: '#10B981',
+  container: {
+    flex: 1,
+    backgroundColor: '#f9fafb',
+  },
+  heroSection: {
+    backgroundColor: '#10b981',
+    paddingTop: Platform.OS === 'ios' ? 60 : 50,
+    paddingBottom: 40,
     paddingHorizontal: 24,
-    paddingTop: 34,
-    paddingBottom: 10,
     alignItems: 'center',
   },
-  iconContainer: {
-    width: 96,
-    height: 96,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 48,
-    alignItems: 'center',
+  trophyContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 24,
   },
-  icon: { fontSize: 60 },
-  headerTitle: {
-    fontSize: 30,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+  heroTitle: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#fff',
+    textAlign: 'center',
     marginBottom: 8,
   },
-  headerSubtitle: { color: '#D1FAE5', textAlign: 'center', fontSize: 18 },
-  card: {
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: 24,
+  heroSubtitle: {
+    fontSize: 16,
+    color: '#d1fae5',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  statsCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
     marginTop: 24,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 24,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 12,
+    elevation: 5,
   },
-  cardTitle: { fontSize: 20, fontWeight: 'bold', color: '#111827', marginBottom: 16 },
-  goalTitle: { fontSize: 18, color: '#1F2937', marginBottom: 8 },
-  goalDescription: { color: '#6B7280', marginBottom: 16 },
-  statsContainer: { backgroundColor: '#ECFDF5', padding: 16, borderRadius: 12 },
-  statRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  statLabel: { color: '#065F46', fontWeight: '500' },
-  statValue: { color: '#065F46', fontWeight: 'bold', fontSize: 20 },
-  experienceHeader: { fontSize: 20, fontWeight: 'bold', color: '#111827', paddingBottom: 8 },
-  experienceImage: { width: '100%', height: 192, marginVertical: 16, borderRadius: 8 },
-  experienceContent: { paddingTop: 8 },
-  experienceTitle: { fontSize: 24, fontWeight: 'bold', color: '#111827', marginBottom: 8 },
-  categoryBadge: { color: '#9333EA', fontWeight: '600', marginBottom: 12 },
-  experienceDescription: { color: '#374151', marginBottom: 16, lineHeight: 24 },
-  stepText: { color: '#374151', lineHeight: 20 },
-  loadingContainer: {
+  statsHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 20,
+    gap: 12,
+    marginBottom: 16,
+  },
+  statsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  goalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  goalDesc: {
+    fontSize: 15,
+    color: '#6b7280',
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  statsBadge: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 16,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  statsNumber: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#f59e0b',
+  },
+  statsLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#92400e',
+  },
+  experienceCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    marginTop: 24,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  experienceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 20,
+    paddingBottom: 16,
+  },
+  experienceHeaderText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  experienceImage: {
+    width: '100%',
+    height: 220,
+    backgroundColor: '#e5e7eb',
+  },
+  experienceContent: {
+    padding: 20,
+  },
+  experienceTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  experienceSubtitle: {
+    fontSize: 16,
+    color: '#6b7280',
+    marginBottom: 12,
+  },
+  experienceDescription: {
+    fontSize: 15,
+    color: '#374151',
+    lineHeight: 22,
+  },
+  couponSection: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    marginTop: 24,
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  couponHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  couponHeaderText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  couponInstructions: {
+    fontSize: 14,
+    color: '#6b7280',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  loadingBox: {
+    paddingVertical: 40,
+    alignItems: 'center',
   },
   loadingText: {
     marginTop: 12,
-    color: '#6B7280',
     fontSize: 14,
+    color: '#6b7280',
   },
-  couponContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F3E8FF',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  couponCard: {
+    marginBottom: 16,
+  },
+  couponCodeBox: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 16,
+    padding: 24,
     marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    borderStyle: 'dashed',
   },
   couponCode: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#7C3AED',
-    letterSpacing: 1.5,
-  },
-  couponNote: {
-    fontSize: 14,
-    color: '#6B7280',
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#8b5cf6',
     textAlign: 'center',
-    fontStyle: 'italic',
+    letterSpacing: 4,
   },
   copyButton: {
-    backgroundColor: '#7C3AED',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-  },
-  copyButtonText: { color: '#FFF', fontWeight: '600' },
-  buttonContainer: { padding: 24 },
-  primaryButton: {
-    backgroundColor: '#9333EA',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#f5f3ff',
+    paddingVertical: 14,
     borderRadius: 12,
-    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: '#e9d5ff',
   },
-  disabledButton: {
-    backgroundColor: '#9CA3AF',
+  copyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8b5cf6',
+  },
+  copiedText: {
+    color: '#10b981',
+  },
+  validityBox: {
+    backgroundColor: '#f0fdf4',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  validityText: {
+    fontSize: 13,
+    color: '#166534',
+    fontWeight: '600',
+  },
+  generateButton: {
+    backgroundColor: '#8b5cf6',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 16,
+    borderRadius: 12,
+  },
+  generateButtonDisabled: {
     opacity: 0.6,
   },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
+  generateButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
   },
-  secondaryButton: { backgroundColor: '#4B5563', borderRadius: 12, paddingVertical: 16 },
-  secondaryButtonText: {
-    color: '#FFFFFF',
+  bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  doneButton: {
+    backgroundColor: '#10b981',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  doneButtonText: {
     fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
+    fontWeight: '700',
+    color: '#fff',
   },
 });
 

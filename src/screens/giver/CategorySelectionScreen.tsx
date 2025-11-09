@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,13 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import MainScreen from '../MainScreen'; // Assuming this path is correct
 import { getAuth } from 'firebase/auth';
 import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../services/firebase'; // Assuming this path is correct
-import { Ionicons } from '@expo/vector-icons';
+import { Heart } from 'lucide-react-native';
 // This is required for the gradient text effect
 import MaskedView from '@react-native-masked-view/masked-view';
 
@@ -27,8 +27,9 @@ type ExperienceCategory = 'adventure' | 'wellness' | 'food-culture' | 'entertain
 type Experience = {
   id: string;
   title: string;
+  subtitle: string;
   description: string;
-  imageUrl: string;
+  coverImageUrl: string;
   category: ExperienceCategory;
   price: number;
 };
@@ -54,7 +55,7 @@ const ExperienceCard = ({
 }) => (
   <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={styles.experienceCard}>
     <View style={styles.cardImageContainer}>
-      <Image source={{ uri: experience.imageUrl }} style={styles.cardImage} resizeMode="cover" />
+      <Image source={{ uri: experience.coverImageUrl }} style={styles.cardImage} resizeMode="cover" />
 
       <TouchableOpacity
         onPress={(e) => {
@@ -63,31 +64,29 @@ const ExperienceCard = ({
         }}
         style={styles.heartButton}
       >
-        <Ionicons
-          name={isWishlisted ? 'heart' : 'heart-outline'}
-          size={22}
-          color={isWishlisted ? '#ef4444' : '#fff'}
-        />
+        {isWishlisted ? (
+          <Heart fill="#ef4444" color="#ef4444" size={22} />
+        ) : (
+          <Heart color="#fff" size={22} />
+        )}
+
       </TouchableOpacity>
     </View>
 
-    {/* --- 1. MODIFIED CARD CONTENT LAYOUT --- */}
     <View style={styles.cardContent}>
-      {/* Group title and description */}
-      <View>
-        <Text style={styles.cardTitle} numberOfLines={1}>
+      <View style={styles.textBlock}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
           {experience.title}
         </Text>
-        <Text style={styles.cardDescription} numberOfLines={2}>
-          {experience.description}
+        <Text style={styles.cardSubtitle} numberOfLines={2}>
+          {experience.subtitle}
         </Text>
       </View>
-      
-      {/* Price is now separate, will be pushed to bottom */}
-      <Text style={styles.cardPrice}>
-        {experience.price.toFixed(2)} €
-      </Text>
+
+      <Text style={styles.cardPrice}>{experience.price.toFixed(0)} €</Text>
     </View>
+
+
   </TouchableOpacity>
 );
 
@@ -189,19 +188,21 @@ const CategorySelectionScreen = () => {
     fetchExperiences();
   }, []);
 
-  // Load wishlist from Firestore
-  useEffect(() => {
-    const fetchWishlist = async () => {
-      if (!user) return;
-      const userRef = doc(db, 'users', user.uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
-        const data = userSnap.data();
-        setWishlist(data.wishlist || []);
-      }
-    };
-    fetchWishlist();
-  }, [user]);
+  useFocusEffect(
+    useCallback(() => {
+      const fetchWishlist = async () => {
+        if (!user) return;
+        const userRef = doc(db, 'users', user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          setWishlist(data.wishlist || []);
+        }
+      };
+
+      fetchWishlist();
+    }, [user])
+  );
 
   const toggleWishlist = async (experienceId: string) => {
     if (!user) {
@@ -311,7 +312,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 34,
+    // paddingTop: 16,
     paddingBottom: 10,
   },
   headerTitle: {
@@ -366,7 +367,7 @@ const styles = StyleSheet.create({
   },
   experienceCard: {
     marginRight: 12,
-    width: 160,
+    width: 175,
     backgroundColor: '#ffffff',
     borderRadius: 12,
     shadowColor: '#000',
@@ -394,28 +395,37 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   cardContent: {
-    padding: 10,
-    flex: 1, // <-- 3. ADDED FLEX
-    justifyContent: 'space-between', // <-- 3. ADDED JUSTIFYCONTENT
-  },
-  cardTitle: {
-    color: '#111827',
-    fontWeight: 'bold',
-    fontSize: 15,
-    marginBottom: 3,
-  },
-  cardDescription: {
-    color: '#6b7280',
-    fontSize: 13,
-    lineHeight: 18,
-    // marginBottom: 6, // <-- 4. REMOVED MARGIN
-  },
-  cardPrice: {
-    color: '#166534',
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'right',
-  },
+  padding: 10,
+  height: 90, // fixed consistent text+price zone
+  justifyContent: "space-between",
+},
+
+textBlock: {
+  height: 64, // consistent space for title + subtitle (2 lines each)
+  overflow: "hidden",
+},
+
+cardTitle: {
+  color: "#111827",
+  fontWeight: "bold",
+  fontSize: 15,
+  lineHeight: 18,
+},
+
+cardSubtitle: {
+  color: "#6b7280",
+  fontSize: 13,
+  lineHeight: 17,
+  marginTop: 2,
+},
+
+cardPrice: {
+  color: "#166534",
+  fontSize: 14,
+  fontWeight: "bold",
+  textAlign: "right",
+},
+
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',

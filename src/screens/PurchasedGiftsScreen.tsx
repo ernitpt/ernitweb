@@ -13,6 +13,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useApp } from '../context/AppContext';
 import MainScreen from './MainScreen';
 import { experienceGiftService } from '../services/ExperienceGiftService';
+import { experienceService } from '../services/ExperienceService';
 import { userService } from '../services/userService';
 import { ExperienceGift, RootStackParamList } from '../types';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -92,12 +93,26 @@ const PurchasedGiftsScreen = () => {
 
       fetchClaimerName();
     }, [item.status, item.id]);
-
+    const [experience, setExperience] = useState<any>(null);
+    
+    useEffect(() => {
+      const fetchExperience = async () => {
+        try {
+          const exp = await experienceService.getExperienceById(item.experienceId);
+          setExperience(exp);
+        } catch (error) {
+          console.error("Error fetching experience:", error);
+        }
+      };
+      fetchExperience();
+    }, [item.experienceId]);
 
     return (
       <View style={styles.card}>
         <View style={styles.cardRow}>
-          <Text style={styles.title}>{item.experience.title}</Text>
+          <Text style={styles.title}>
+            {experience ? experience.title : "Loading..."}
+          </Text>
           <Text
             style={[
               styles.status,
@@ -169,7 +184,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 34,
+    // paddingTop: 34,
     paddingBottom: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',

@@ -15,10 +15,10 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
 import { getAuth, signOut } from 'firebase/auth';
 
-import SettingsIcon from '../assets/icons/settings.svg';
-import PurchaseIcon from '../assets/icons/purchased_gifts.svg';
-import RedeemIcon from '../assets/icons/redeem.svg';
-import LogoutIcon from '../assets/icons/logout.svg';
+import SettingsIcon from '../assets/icons/Settings';
+import PurchaseIcon from '../assets/icons/PurchaseIcon';
+import RedeemIcon from '../assets/icons/Redeem';
+import LogoutIcon from '../assets/icons/Logout';
 
 type SideMenuProps = {
   visible: boolean;
@@ -134,11 +134,11 @@ const SideMenu: React.FC<SideMenuProps> = ({ visible, onClose }) => {
 
           {/* Menu list */}
           <View style={styles.menuItemsContainer}>
-            <MenuItem
+            {/* <MenuItem
               Icon={SettingsIcon}
               title="Settings"
               onPress={() => handleMenuPress('Settings')}
-            />
+            /> */}
             <MenuItem
               Icon={RedeemIcon}
               title="Redeem Coupon"

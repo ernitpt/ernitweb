@@ -1,42 +1,37 @@
+import { firebaseConfig } from '../config/firebaseConfig';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  initializeAuth,
   getAuth,
-  getReactNativePersistence,
+  setPersistence,
   browserLocalPersistence,
+  initializeAuth,
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import { getFunctions } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
-import { firebaseConfig, validateFirebaseConfig } from '../config/firebaseConfig';
+import { getFunctions } from 'firebase/functions';
 
-// ✅ Validate Firebase configuration
-if (!validateFirebaseConfig()) {
-  console.error('Firebase configuration is incomplete. Please check your environment variables.');
-}
 
-// ✅ Initialize the Firebase app (avoid re-initialization)
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+// ✅ Prevent re-init on hot reload
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// ✅ Initialize Auth depending on the platform
+// ✅ Initialize Auth with correct persistence
 let auth;
 
-if (Platform.OS === 'web') {
-  // Web version — uses browser local persistence
+if (typeof window !== 'undefined') {
+  // 🌐 Web
   auth = getAuth(app);
-  auth.setPersistence(browserLocalPersistence);
+  setPersistence(auth, browserLocalPersistence);
 } else {
-  // Native (Android / iOS) version — uses AsyncStorage
+  // 📱 React Native (iOS/Android)
+  const { getReactNativePersistence } = require('firebase/auth'); // ✅ no /react-native needed
   auth = initializeAuth(app, {
     persistence: getReactNativePersistence(AsyncStorage),
   });
 }
 
-// ✅ Initialize other Firebase services
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
 export const functions = getFunctions(app, 'us-central1');
-export { auth };
-export default app;
+
+export { app, auth, db, storage };
