@@ -5,11 +5,12 @@
 // scripts/seedExperiences.js
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
-const serviceAccount = require('./serviceAccountKey.json'); // Place this in the same folder
+const SERVICE_ACCOUNT_KEY = defineSecret("SERVICE_ACCOUNT_KEY");
+
 
 // Initialize Firebase Admin
 initializeApp({
-  credential: cert(serviceAccount),
+  credential: cert(SERVICE_ACCOUNT_KEY),
 });
 
 const db = getFirestore();
