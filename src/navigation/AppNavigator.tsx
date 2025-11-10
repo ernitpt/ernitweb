@@ -145,7 +145,7 @@ const AppNavigator = () => {
           <>
             <RootStack.Screen name="GiverFlow" component={GiverNavigator} />
             <RootStack.Screen name="CategorySelection" component={CategorySelectionScreen} />
-            {/* <RootStack.Screen name="Main" component={CategorySelectionScreen} /> */}
+            <RootStack.Screen name="Confirmation" component={ConfirmationScreen} />
             <RootStack.Screen name="Profile" component={UserProfileScreen} />
             <RootStack.Screen name="Goals" component={GoalsScreen} />
             <RootStack.Screen name="GoalDetail" component={GoalDetailScreen} />

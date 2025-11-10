@@ -1,9 +1,18 @@
 import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import Stripe from "stripe";
+import * as admin from "firebase-admin";
 
 const STRIPE_SECRET = defineSecret("STRIPE_SECRET_KEY");
 
+// Initialize Firebase Admin if not already initialized
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
+const db = admin.firestore();
+
+// ========== CREATE PAYMENT INTENT ==========
 export const stripeCreatePaymentIntent = onRequest(
   {
     region: "europe-west1",
@@ -40,7 +49,8 @@ export const stripeCreatePaymentIntent = onRequest(
     }
 
     try {
-      const { amount, experienceId, giverId } = req.body || {};
+      const { amount, experienceId, giverId, giverName, partnerId, personalizedMessage } = req.body || {};
+      
       if (!amount || !experienceId || !giverId) {
         res.status(400).json({ error: "Missing required parameters" });
         return;
@@ -52,14 +62,21 @@ export const stripeCreatePaymentIntent = onRequest(
 
       console.log("💳 Creating PaymentIntent:", { amount, experienceId, giverId });
 
+      // Create PaymentIntent with all necessary metadata for webhook
       const intent = await stripe.paymentIntents.create({
         amount: Math.round(amount * 100),
         currency: "eur",
         automatic_payment_methods: { enabled: true, allow_redirects: "always" },
-        metadata: { experienceId, giverId },
+        metadata: {
+          experienceId,
+          giverId,
+          giverName: giverName || "",
+          partnerId: partnerId || "",
+          personalizedMessage: personalizedMessage || "",
+          source: "ernit_experience_gift",
+        },
       });
 
-      // ✅ Just send, don't return
       res.status(200).json({ clientSecret: intent.client_secret });
     } catch (err: any) {
       console.error("❌ Stripe error:", err);

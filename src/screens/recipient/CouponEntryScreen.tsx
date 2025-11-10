@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, SafeAreaView, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, SafeAreaView, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Animated, Easing, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -9,6 +9,7 @@ import { useApp } from '../../context/AppContext'; // Ensure this path is correc
 import MainScreen from '../MainScreen';
 import { db } from '../../services/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import { Italic } from 'lucide-react-native';
 
 type CouponEntryNavigationProp = NativeStackNavigationProp<RecipientStackParamList, 'CouponEntry'>;
 
@@ -18,11 +19,38 @@ const CouponEntryScreen = () => {
   const [claimCode, setClaimCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [showMessagePopup, setShowMessagePopup] = useState(false);
+  const [popupMessage, setPopupMessage] = useState<string | null>(null);
+  const [popupGiverName, setPopupGiverName] = useState<string | null>(null);
+  const [currentGift, setCurrentGift] = useState<ExperienceGift | null>(null);
+
+  const popupAnim = useRef(new Animated.Value(0)).current;
+  const popupScale = useRef(new Animated.Value(0.9)).current;
 
   const validateClaimCode = (code: string) => {
     const codeRegex = /^[A-Z0-9]{6}$/;
     return codeRegex.test(code);
   };
+  const closeMessagePopup = () => {
+    Animated.parallel([
+      Animated.timing(popupAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+      Animated.timing(popupScale, { toValue: 0.9, duration: 150, useNativeDriver: true }),
+    ]).start(() => setShowMessagePopup(false));
+  };
+
+  const proceedToGoal = () => {
+    closeMessagePopup();
+
+    setTimeout(() => {
+      if (currentGift) {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "GoalSetting", params: { experienceGift: currentGift } }],
+        });
+      }
+    }, 200);
+  };
+
 
   const handleClaimCode = async () => {
   const trimmedCode = claimCode.trim().toUpperCase();
@@ -55,15 +83,34 @@ const CouponEntryScreen = () => {
     // Take the first matching gift (should only be one)
     const giftDoc = querySnapshot.docs[0];
     const experienceGift = { id: giftDoc.id, ...(giftDoc.data() as ExperienceGift) };
+    setCurrentGift(experienceGift);
 
-    // Update app state
-    dispatch({ type: 'SET_EXPERIENCE_GIFT', payload: experienceGift });
+    // ✅ If message exists, show popup instead of navigating immediately
+    if (experienceGift.personalizedMessage) {
+      setPopupMessage(experienceGift.personalizedMessage);
+      setPopupGiverName(experienceGift.giverName || "your friend");
+      setShowMessagePopup(true);
 
-    // Navigate to GoalSetting screen
+      // Animate popup in
+      Animated.parallel([
+        Animated.timing(popupAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(popupScale, { toValue: 1, friction: 5, useNativeDriver: true }),
+      ]).start();
+
+      // Store gift for later navigation
+      dispatch({ type: "SET_EXPERIENCE_GIFT", payload: experienceGift });
+      setIsLoading(false);
+      dispatch({ type: "SET_LOADING", payload: false });
+      return; // ✅ Stop here until user presses "Continue"
+    }
+
+    // If no message, go directly
+    dispatch({ type: "SET_EXPERIENCE_GIFT", payload: experienceGift });
     navigation.reset({
       index: 0,
-      routes: [{ name: 'GoalSetting', params: { experienceGift } }],
+      routes: [{ name: "GoalSetting", params: { experienceGift } }],
     });
+
   } catch (error) {
     console.error('Error claiming experience gift:', error);
     setErrorMessage('An error occurred. Please try again.');
@@ -259,8 +306,127 @@ const CouponEntryScreen = () => {
         </KeyboardAvoidingView>
       </SafeAreaView>
       </LinearGradient>
+      {showMessagePopup && (
+  <Animated.View
+    style={[
+      styles.modalOverlay,
+      { opacity: popupAnim, transform: [{ scale: popupScale }] },
+    ]}
+  >
+    <LinearGradient
+      colors={["#faf5ff", "#f5f3ff"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.modalBox}
+    >
+      <Text style={styles.modalHeader}>A message from</Text>
+      <Text style={styles.modalGiverName}>
+        {popupGiverName || "Someone who believes in you 💙"}
+      </Text>
+
+      <View style={styles.messageBubble}>
+        <Text style={styles.modalMessageText}>"{popupMessage}"</Text>
+      </View>
+
+      <TouchableOpacity
+        onPress={proceedToGoal}
+        style={styles.continueButton}
+        activeOpacity={0.8}
+      >
+        <LinearGradient
+          colors={["#7C3AED", "#3B82F6"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.continueGradient}
+        >
+          <Text style={styles.continueText}>Continue</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    </LinearGradient>
+  </Animated.View>
+)}
+
+
     </MainScreen>
   );
 };
+
+const styles = StyleSheet.create({
+ modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+    zIndex: 999,
+  },
+  modalBox: {
+    width: "90%",
+    maxWidth: 380,
+    borderRadius: 24,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+    alignItems: "center",
+  },
+  modalHeader: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#6B7280",
+    textAlign: "center",
+  },
+  modalGiverName: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#5B21B6",
+    marginBottom: 10,
+    marginTop: 4,
+    textAlign: "center",
+  },
+  messageBubble: {
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    paddingVertical: 18,
+    paddingHorizontal: 22,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#E9D5FF",
+    shadowColor: "#7C3AED",
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    margin: 4,
+  },
+  modalMessageText: {
+    fontSize: 17,
+    color: "#303b4bff",
+    textAlign: "center",
+    lineHeight: 26,
+    fontWeight: "400",
+    fontStyle: "italic",
+  },
+  continueButton: {
+    width: "100%",
+  },
+  continueGradient: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  continueText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+});
 
 export default CouponEntryScreen;

@@ -63,7 +63,7 @@ const FriendProfileScreen: React.FC = () => {
   }, [userId]);
 
   useEffect(() => {
-    if (userProfile) animateContent();
+    if (userName) animateContent();
   }, [activeTab]);
 
   const animateContent = () => {
@@ -126,7 +126,7 @@ const FriendProfileScreen: React.FC = () => {
   };
 
   const handleSendFriendRequest = async () => {
-    if (!currentUserId || !userProfile) {
+    if (!currentUserId || !userName) {
       console.log('no profile');
       return;
     }
@@ -137,12 +137,12 @@ const FriendProfileScreen: React.FC = () => {
         currentUserId,
         currentUserName,
         userId,
-        userProfile.name,
+        userName,
         state.user?.profile?.country,
         currentUserProfileImageUrl
       );
       setHasPendingRequest(true);
-      Alert.alert('Success', `Friend request sent to ${userProfile.name}!`);
+      Alert.alert('Success', `Friend request sent to ${userName}!`);
     } catch (error) {
       console.error('Error sending friend request:', error);
       Alert.alert('Error', 'Failed to send friend request.');
@@ -156,7 +156,7 @@ const FriendProfileScreen: React.FC = () => {
   };
 
   const confirmRemoveFriend = async () => {
-    if (!currentUserId || !userProfile) return;
+    if (!currentUserId || !userName) return;
     try {
       setIsActionLoading(true);
       await friendService.removeFriend(currentUserId, userId);
