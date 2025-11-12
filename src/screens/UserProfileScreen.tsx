@@ -287,7 +287,7 @@ const UserProfileScreen: React.FC = () => {
             ) : (
               <View style={styles.placeholderImage}>
                 <Text style={styles.placeholderText}>
-                  {userProfile?.name?.[0]?.toUpperCase() || 'U'}
+                  {state.user?.displayName?.[0]?.toUpperCase() || 'U'}
                 </Text>
               </View>
             )}
