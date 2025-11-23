@@ -353,24 +353,32 @@ const DetailedGoalCard: React.FC<DetailedGoalCardProps> = ({ goal, onFinish }) =
             experienceTitle: experience.title,
           }
         );
-        onFinish?.(updated);
+        // Don't call onFinish for completed goals - handle navigation here
         navigation.navigate('Completion', { goal: updated, experienceGift: gift });
       } else {
         const hintToShow = pendingHint || "Keep going! You're doing great 💪";
 
         if (pendingHint) {
-          const hintObj = { session: totalSessionsDone, hint: pendingHint, date: Date.now() };
-          await goalService.appendHint(goalId, hintObj);
+          try {
+            const hintObj = { session: totalSessionsDone, hint: pendingHint, date: Date.now() };
+            await goalService.appendHint(goalId, hintObj);
 
-          setCurrentGoal((prev) => ({
-            ...prev,
-            hints: [...(prev.hints || []), hintObj],
-          }));
+            setCurrentGoal((prev) => ({
+              ...prev,
+              hints: [...(prev.hints || []), hintObj],
+            }));
+          } catch (err) {
+            console.warn('Failed to save hint:', err);
+            // Don't block progress if hint save fails
+          }
         }
 
         setLastHint(hintToShow);
         setShowHint(true);
         setPendingHint(null);
+
+        // Call onFinish for progress updates
+        onFinish?.(updated);
 
         await notificationService.createNotification(
           updated.empoweredBy,
@@ -449,9 +457,8 @@ Weeks completed: ${updated.currentCount}/${updated.targetCount}`,
 
     } catch (err) {
       console.warn('Hint pre-generation failed:', err);
-      setIsTimerRunning(false);
-      setStartTime(null);
-      Alert.alert('Error', 'Could not start the session timer. Please try again.');
+      // Don't block session start - hint is optional
+      // Timer state is already set, so session will start without hint
     } finally {
       setLoading(false);
     }

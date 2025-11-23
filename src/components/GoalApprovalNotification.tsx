@@ -66,15 +66,6 @@ const GoalApprovalNotification: React.FC<GoalApprovalNotificationProps> = ({
         await notificationService.deleteNotification(notification.id, true);
       } catch (deleteError) {
         console.warn('Could not delete original notification:', deleteError);
-        // Try direct delete as fallback
-        try {
-          const { doc, deleteDoc: deleteDocFn } = await import('firebase/firestore');
-          const { db } = await import('../services/firebase');
-          const ref = doc(db, 'notifications', notification.id);
-          await deleteDocFn(ref);
-        } catch (e) {
-          console.warn('Direct delete also failed:', e);
-        }
       }
 
       // Create confirmation notification for giver
