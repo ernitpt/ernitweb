@@ -73,3 +73,5 @@ node_modules/
 app.json
 
 serviceAccountKey.json
+
+.dist

@@ -5,7 +5,7 @@ import * as admin from "firebase-admin";
 
 const STRIPE_SECRET = defineSecret("STRIPE_SECRET_KEY");
 
-const db = admin.firestore();
+import { db } from './index';
 
 export const updatePaymentIntentMetadata = onRequest(
   {
@@ -14,7 +14,7 @@ export const updatePaymentIntentMetadata = onRequest(
   },
   async (req, res) => {
     const origin = req.headers.origin || "";
-    
+
     const allowedOrigins: (string | RegExp)[] = [
       "http://localhost:8081",
       "http://localhost:3000",
@@ -43,7 +43,7 @@ export const updatePaymentIntentMetadata = onRequest(
 
     try {
       const { paymentIntentId, personalizedMessage } = req.body || {};
-      
+
       if (!paymentIntentId) {
         res.status(400).json({ error: "Missing paymentIntentId" });
         return;

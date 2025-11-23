@@ -1,44 +1,35 @@
 import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import Stripe from "stripe";
-import * as admin from "firebase-admin";
 
 const STRIPE_SECRET = defineSecret("STRIPE_SECRET_KEY");
 
-// Initialize Firebase Admin if not already initialized
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
-
-const db = admin.firestore();
-
-// ========== CREATE PAYMENT INTENT ==========
+// ========== CREATE PAYMENT INTENT WITH CART ==========
 export const stripeCreatePaymentIntent = onRequest(
   {
     region: "europe-west1",
     secrets: [STRIPE_SECRET],
+    maxInstances: 10,
+    memory: "256MiB",
+    timeoutSeconds: 30,
   },
   async (req, res) => {
     const origin = req.headers.origin || "";
     console.log("stripeCreatePaymentIntent origin:", origin);
 
-    const allowedOrigins: (string | RegExp)[] = [
+    const allowedOrigins: string[] = [
       "http://localhost:8081",
       "http://localhost:3000",
-      /^https:\/\/.*\.vercel\.app$/,
-      "https://ernit-nine.vercel.app",
       "https://ernit.app",
     ];
 
-    const allowOrigin = allowedOrigins.some((entry) =>
-      entry instanceof RegExp ? entry.test(origin) : entry === origin
-    );
+    const allowOrigin = allowedOrigins.includes(origin);
     if (allowOrigin) res.set("Access-Control-Allow-Origin", origin);
 
     res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
     res.set(
       "Access-Control-Allow-Headers",
-      req.headers["access-control-request-headers"] || "Content-Type, Authorization"
+      "Content-Type, Authorization"
     );
     res.set("Access-Control-Allow-Credentials", "true");
     res.set("Vary", "Origin");
@@ -48,11 +39,53 @@ export const stripeCreatePaymentIntent = onRequest(
       return;
     }
 
+    // ✅ Verify Firebase Auth token
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Unauthorized: Missing token' });
+      return;
+    }
+
+    let userId: string;
     try {
-      const { amount, experienceId, giverId, giverName, partnerId, personalizedMessage } = req.body || {};
-      
-      if (!amount || !experienceId || !giverId) {
-        res.status(400).json({ error: "Missing required parameters" });
+      const { getAuth } = await import('firebase-admin/auth');
+      const token = authHeader.split('Bearer ')[1];
+      const decodedToken = await getAuth().verifyIdToken(token);
+      userId = decodedToken.uid;
+    } catch (error) {
+      console.error('❌ Token verification failed:', error);
+      res.status(401).json({ error: 'Unauthorized: Invalid token' });
+      return;
+    }
+
+    // ✅ Validate request size
+    const contentLength = parseInt(req.headers['content-length'] || '0');
+    if (contentLength > 10000) {
+      res.status(413).json({ error: 'Payload too large' });
+      return;
+    }
+
+    try {
+      const {
+        amount,
+        giverId,
+        giverName,
+        cart,
+        primaryPartnerId,
+        personalizedMessage,
+      } = req.body || {};
+
+      // ✅ Verify giverId matches authenticated user
+      if (giverId !== userId) {
+        res.status(403).json({ error: 'Forbidden: User ID mismatch' });
+        return;
+      }
+
+      // --- Validate ---
+      if (!amount || !giverId || !cart || !Array.isArray(cart)) {
+        res.status(400).json({
+          error: "Missing required parameters",
+        });
         return;
       }
 
@@ -60,27 +93,40 @@ export const stripeCreatePaymentIntent = onRequest(
         apiVersion: "2024-06-20" as any,
       });
 
-      console.log("💳 Creating PaymentIntent:", { amount, experienceId, giverId });
+      console.log("🛒 Creating PaymentIntent for cart:", cart);
 
-      // Create PaymentIntent with all necessary metadata for webhook
+      // Convert cart to metadata-safe format
+      const cartJSON = JSON.stringify(cart);
+
+      // Create PaymentIntent
       const intent = await stripe.paymentIntents.create({
         amount: Math.round(amount * 100),
         currency: "eur",
-        automatic_payment_methods: { enabled: true, allow_redirects: "always" },
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: "always",
+        },
         metadata: {
-          experienceId,
+          type: "multiple_experience_gifts",
           giverId,
           giverName: giverName || "",
-          partnerId: partnerId || "",
+          primaryPartnerId: primaryPartnerId || "",
+          cart: cartJSON,
           personalizedMessage: personalizedMessage || "",
           source: "ernit_experience_gift",
         },
       });
 
-      res.status(200).json({ clientSecret: intent.client_secret });
+      res.status(200).json({
+        clientSecret: intent.client_secret,
+        paymentIntentId: intent.id,
+      });
     } catch (err: any) {
       console.error("❌ Stripe error:", err);
-      res.status(500).json({ error: err.message || "Internal error" });
+      // ✅ Generic error message to client
+      res.status(500).json({
+        error: "Payment processing failed",
+      });
     }
   }
 );

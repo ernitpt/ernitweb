@@ -41,6 +41,12 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write, update, delete: if request.auth != null && request.auth.uid == userId;
 
+      // ⚠️ TEMPORARY: Allow updating onboardingStatus for migration
+      // TODO: Remove this after migration is complete
+      allow update: if request.auth != null 
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['onboardingStatus', 'updatedAt'])
+        && request.resource.data.onboardingStatus in ['not_started', 'completed', 'skipped'];
+
       // User coupons: users/{userId}/coupons/{couponId}
       match /coupons/{couponId} {
         allow create, read, update, delete: if request.auth != null && request.auth.uid == userId;

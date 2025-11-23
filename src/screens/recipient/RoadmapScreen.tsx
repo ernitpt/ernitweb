@@ -6,11 +6,15 @@ import { StatusBar } from 'expo-status-bar';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
-import type { RecipientStackParamList, Goal } from '../../types';
+import type { RecipientStackParamList, Goal, ExperienceGift } from '../../types';
 import MainScreen from '../MainScreen';
 import DetailedGoalCard from './DetailedGoalCard';
+import GoalChangeSuggestionModal from '../../components/GoalChangeSuggestionModal';
+import { goalService } from '../../services/GoalService';
+import { notificationService } from '../../services/NotificationService';
+import { experienceGiftService } from '../../services/ExperienceGiftService';
 
 type Nav = NativeStackNavigationProp<RecipientStackParamList, 'Roadmap'>;
 
@@ -19,17 +23,44 @@ const RoadmapScreen = () => {
   const route = useRoute();
   const { goal } = route.params as { goal: Goal };
   const [currentGoal, setCurrentGoal] = useState(goal);
+  const [experienceGift, setExperienceGift] = useState<ExperienceGift | null>(null);
 
   // 🔹 Keep goal synced with Firestore
   useEffect(() => {
     const ref = doc(db, 'goals', goal.id);
-    const unsub = onSnapshot(ref, (snap) => {
+    const unsub = onSnapshot(ref, async (snap) => {
       if (snap.exists()) {
-        setCurrentGoal(snap.data() as Goal);
+        const updatedGoal = snap.data() as Goal;
+        setCurrentGoal(updatedGoal);
+        
+        // Check for auto-approval
+        if (updatedGoal.approvalStatus === 'pending' && updatedGoal.approvalDeadline) {
+          const now = new Date();
+          if (now >= updatedGoal.approvalDeadline && !updatedGoal.giverActionTaken) {
+            await goalService.checkAndAutoApprove(goal.id);
+          }
+        }
       }
     });
     return () => unsub();
   }, [goal.id]);
+
+  // 🔹 Fetch experience gift to get personalized message
+  useEffect(() => {
+    const fetchExperienceGift = async () => {
+      if (goal.experienceGiftId) {
+        try {
+          const gift = await experienceGiftService.getExperienceGiftById(goal.experienceGiftId);
+          if (gift) {
+            setExperienceGift(gift);
+          }
+        } catch (error) {
+          console.error('Error fetching experience gift:', error);
+        }
+      }
+    };
+    fetchExperienceGift();
+  }, [goal.experienceGiftId]);
 
   const headerColors = ['#462088ff', '#235c9eff'] as const;
 
@@ -110,6 +141,18 @@ const RoadmapScreen = () => {
           paddingHorizontal: 16, // optional for margins
         }}
       >
+        {/* Personalized Message Card */}
+        {experienceGift?.personalizedMessage?.trim() && (
+  <View style={styles.messageCard}>
+    <Text style={styles.messageText}>
+      “{experienceGift.personalizedMessage.trim()}”
+    </Text>
+    <Text style={styles.messageFrom}>— {experienceGift.giverName}</Text>
+  </View>
+)}
+
+
+
         <DetailedGoalCard goal={currentGoal} onFinish={(g) => setCurrentGoal(g)} />
       </View>
 
@@ -157,6 +200,26 @@ const styles = StyleSheet.create({
     padding: 20,
     marginTop: 16,
   },
+  messageCard: {
+    backgroundColor: '#ede9fe',
+    padding: 20,
+    borderRadius: 18,
+    marginBottom: 20,
+  },
+  messageText: {
+    fontSize: 17,
+    color: '#4c1d95',
+    lineHeight: 26,
+    fontWeight: '500',
+  },
+  messageFrom: {
+    fontSize: 14,
+    color: '#6d28d9',
+    marginTop: 10,
+    fontWeight: '600',
+  },
+  
+  
   title: { fontSize: 20, fontWeight: 'bold', color: '#111827', marginBottom: 6 },
   // emptyText: {
   //   textAlign: 'center',
@@ -243,6 +306,19 @@ hintText: {
   fontSize: 15,
   color: '#374151',
   fontStyle: 'italic',
+},
+approvalBanner: {
+  backgroundColor: '#fef3c7',
+  borderRadius: 12,
+  padding: 16,
+  marginBottom: 16,
+  borderLeftWidth: 4,
+  borderLeftColor: '#f59e0b',
+},
+approvalBannerText: {
+  fontSize: 14,
+  color: '#78350f',
+  lineHeight: 20,
 },
 });
 

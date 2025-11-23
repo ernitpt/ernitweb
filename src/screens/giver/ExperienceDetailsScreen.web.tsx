@@ -16,12 +16,17 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { loadStripe } from "@stripe/stripe-js";
-import { ChevronLeft, MapPin, Clock } from "lucide-react-native";
+import { ChevronLeft, MapPin, Clock, ShoppingCart } from "lucide-react-native";
 import { WebView } from "react-native-webview";
 import { Heart } from "lucide-react-native";
 import { getAuth } from "firebase/auth";
 import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "../../services/firebase";
+import { userService } from "../../services/userService";
+import { CartItem } from "../../types";
+import { useAuthGuard } from "../../hooks/useAuthGuard";
+import LoginPrompt from "../../components/LoginPrompt";
+import { cartService } from "../../services/CartService";
 
 import {
   GiverStackParamList,
@@ -49,7 +54,7 @@ const ZoomableImage = ({ uri, onClose }: { uri: string; onClose: () => void }) =
         <TouchableOpacity style={styles.zoomCloseButton} onPress={onClose}>
           <Text style={styles.zoomCloseText}>✕</Text>
         </TouchableOpacity>
-        
+
         <ScrollView
           contentContainerStyle={styles.zoomScrollContent}
           maximumZoomScale={3}
@@ -75,8 +80,11 @@ function ExperienceDetailsScreenInner({ clientSecret }: { clientSecret: string }
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
+  const [quantity, setQuantity] = useState(1);
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
   const auth = getAuth();
   const user = auth.currentUser;
+  const { requireAuth, showLoginPrompt, loginMessage, closeLoginPrompt } = useAuthGuard();
 
   const images = Array.isArray(experience.imageUrl) ? experience.imageUrl : [experience.imageUrl];
 
@@ -115,11 +123,11 @@ function ExperienceDetailsScreenInner({ clientSecret }: { clientSecret: string }
     : "";
 
   const toggleWishlist = async () => {
-    if (!user) {
-      Alert.alert("Please log in to use wishlist.");
+    if (!requireAuth("Please log in to add items to your wishlist.")) {
       return;
     }
 
+    if (!user) return; // Safety check
     const userRef = doc(db, "users", user.uid);
     const newValue = !isWishlisted;
 
@@ -136,10 +144,94 @@ function ExperienceDetailsScreenInner({ clientSecret }: { clientSecret: string }
     }
   };
 
+  const handleAddToCart = async () => {
+    setIsAddingToCart(true);
+    try {
+      const cartItem: CartItem = {
+        experienceId: experience.id,
+        quantity,
+      };
+
+      // Update in context (works for both authenticated and guest users)
+      dispatch({ type: "ADD_TO_CART", payload: cartItem });
+
+      // If authenticated, also update in Firestore
+      if (user && state.user) {
+        await userService.addToCart(user.uid, cartItem);
+      }
+      // Guest cart is saved automatically via useEffect
+
+      Alert.alert("Success", `Added ${quantity} item(s) to cart!`);
+    } catch (error: any) {
+      console.error("Error adding to cart:", error);
+      Alert.alert("Error", error.message || "Failed to add item to cart.");
+    } finally {
+      setIsAddingToCart(false);
+    }
+  };
+
+  const handleBuyNow = async () => {
+    // Add current item to cart first
+    const cartItem: CartItem = {
+      experienceId: experience.id,
+      quantity,
+    };
+
+    // Update in context
+    dispatch({ type: "ADD_TO_CART", payload: cartItem });
+
+    // If authenticated, also update in Firestore
+    if (user && state.user) {
+      try {
+        await userService.addToCart(user.uid, cartItem);
+      } catch (error: any) {
+        console.error("Error adding to cart:", error);
+        Alert.alert("Error", error.message || "Failed to add item to cart.");
+        return;
+      }
+    }
+
+    // Navigate to cart (will require auth at checkout)
+    navigation.navigate("Cart");
+  };
+
+  const decreaseQuantity = () => {
+    if (quantity > 1) {
+      setQuantity(quantity - 1);
+    }
+  };
+
+  const increaseQuantity = () => {
+    if (quantity < 10) {
+      setQuantity(quantity + 1);
+    }
+  };
+
+  // Calculate cart item count (from user cart or guest cart)
+  const currentCart = state.user?.cart || state.guestCart || [];
+  const cartItemCount = currentCart.reduce((total, item) => total + item.quantity, 0) || 0;
+
+  // Save guest cart to local storage whenever it changes
+  const prevCartRef = useRef<string>('');
+  useEffect(() => {
+    if (!state.user && state.guestCart) {
+      const cartString = JSON.stringify(state.guestCart);
+      if (cartString !== prevCartRef.current) {
+        prevCartRef.current = cartString;
+        cartService.saveGuestCart(state.guestCart);
+      }
+    }
+  }, [state.guestCart, state.user]);
+
+  const handleCartPress = () => {
+    // Allow opening cart even when empty - CartScreen handles empty state
+    navigation.navigate("Cart");
+  };
+
   return (
     <MainScreen activeRoute="Home">
       <StatusBar style="light" />
-      
+
       <ScrollView style={styles.container} bounces={false}>
         {/* Hero Image Carousel */}
         <View style={styles.heroContainer}>
@@ -153,16 +245,31 @@ function ExperienceDetailsScreenInner({ clientSecret }: { clientSecret: string }
             >
               <ChevronLeft color="#fff" size={24} />
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={toggleWishlist}
-              style={styles.heartButtonHero}
-            >
-              {isWishlisted ? (
-                <Heart fill="#ef4444" color="#ef4444" size={24} />
-              ) : (
-                <Heart color="#fff" size={24} />
-              )}
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+              <TouchableOpacity
+                onPress={handleCartPress}
+                style={styles.cartButtonHero}
+              >
+                <ShoppingCart color="#fff" size={24} />
+                {cartItemCount > 0 && (
+                  <View style={styles.cartBadge}>
+                    <Text style={styles.cartBadgeText}>
+                      {cartItemCount > 9 ? "9+" : cartItemCount}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={toggleWishlist}
+                style={styles.heartButtonHero}
+              >
+                {isWishlisted ? (
+                  <Heart fill="#ef4444" color="#ef4444" size={24} />
+                ) : (
+                  <Heart color="#fff" size={24} />
+                )}
+              </TouchableOpacity>
+            </View>
 
           </LinearGradient>
 
@@ -245,7 +352,7 @@ function ExperienceDetailsScreenInner({ clientSecret }: { clientSecret: string }
             </View>
           </View>
 
-          {/* Location Map */}
+          {/* Location Map - RESTORED */}
           {partner?.mapsUrl && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Location</Text>
@@ -284,18 +391,59 @@ function ExperienceDetailsScreenInner({ clientSecret }: { clientSecret: string }
 
       {/* Fixed Bottom CTA */}
       <View style={styles.bottomCTA}>
-        <TouchableOpacity
-          style={styles.ctaButton}
-          onPress={() => navigation.navigate("ExperienceCheckout", { experience })}
-        >
-          <Text style={styles.ctaButtonText}>Continue to Checkout</Text>
-        </TouchableOpacity>
+        {/* Quantity Selector */}
+        <View style={styles.quantityContainer}>
+          <Text style={styles.quantityLabel}>Quantity:</Text>
+          <View style={styles.quantityControls}>
+            <TouchableOpacity
+              style={[styles.quantityButton, quantity === 1 && styles.quantityButtonDisabled]}
+              onPress={decreaseQuantity}
+              disabled={quantity === 1}
+            >
+              <Text style={[styles.quantityButtonText, quantity === 1 && styles.quantityButtonTextDisabled]}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.quantityValue}>{quantity}</Text>
+            <TouchableOpacity
+              style={[styles.quantityButton, quantity === 10 && styles.quantityButtonDisabled]}
+              onPress={increaseQuantity}
+              disabled={quantity === 10}
+            >
+              <Text style={[styles.quantityButtonText, quantity === 10 && styles.quantityButtonTextDisabled]}>+</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={[styles.addToCartButton, isAddingToCart && styles.buttonDisabled]}
+            onPress={handleAddToCart}
+            disabled={isAddingToCart}
+          >
+            <Text style={styles.addToCartButtonText}>
+              {isAddingToCart ? "Adding..." : "Add to Cart"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.buyNowButton}
+            onPress={handleBuyNow}
+          >
+            <Text style={styles.buyNowButtonText}>Buy Now</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Zoomable Image Modal */}
       {selectedImage && (
         <ZoomableImage uri={selectedImage} onClose={() => setSelectedImage(null)} />
       )}
+
+      {/* Login Prompt */}
+      <LoginPrompt
+        visible={showLoginPrompt}
+        onClose={closeLoginPrompt}
+        message={loginMessage}
+      />
     </MainScreen>
   );
 }
@@ -408,17 +556,49 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 24,
   },
-  heartButtonHero: {
+  headerButtons: {
     position: "absolute",
     top: Platform.OS === "ios" ? 50 : 40,
     right: 20,
+    flexDirection: "row",
+    gap: 12,
+    zIndex: 20,
+  },
+  cartButtonHero: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: "rgba(0,0,0,0.3)",
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 20,
+    position: "relative",
+  },
+  heartButtonHero: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cartBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: "#ef4444",
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
+  cartBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
   },
   quickInfoItem: {
     flexDirection: "row",
@@ -433,28 +613,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#374151",
     fontWeight: "500",
-  },
-  partnerBadge: {
-    backgroundColor: "#faf5ff",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginBottom: 24,
-    borderLeftWidth: 3,
-    borderLeftColor: "#8b5cf6",
-  },
-  partnerLabel: {
-    fontSize: 12,
-    color: "#9333ea",
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  partnerName: {
-    fontSize: 16,
-    color: "#7c3aed",
-    fontWeight: "700",
   },
   section: {
     marginBottom: 28,
@@ -517,43 +675,82 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  ctaButton: {
+  quantityContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  quantityLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#374151",
+  },
+  quantityControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  quantityButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: "#f3f4f6",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  quantityButtonDisabled: {
+    opacity: 0.5,
+  },
+  quantityButtonText: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#8b5cf6",
+  },
+  quantityButtonTextDisabled: {
+    color: "#9ca3af",
+  },
+  quantityValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#111827",
+    minWidth: 30,
+    textAlign: "center",
+  },
+  actionButtons: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  addToCartButton: {
+    flex: 1,
+    backgroundColor: "#fff",
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#8b5cf6",
+  },
+  addToCartButtonText: {
+    color: "#8b5cf6",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  buyNowButton: {
+    flex: 1,
     backgroundColor: "#8b5cf6",
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: "center",
   },
-  ctaButtonText: {
+  buyNowButtonText: {
     color: "#fff",
     fontSize: 18,
     fontWeight: "700",
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#fff",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: "#6b7280",
-  },
-  errorText: {
-    fontSize: 18,
-    color: "#ef4444",
-    marginBottom: 16,
-  },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: "#8b5cf6",
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+  buttonDisabled: {
+    opacity: 0.6,
   },
   zoomModalContainer: {
     flex: 1,

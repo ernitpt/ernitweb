@@ -1,3 +1,6 @@
+// screens/ExperienceCheckoutScreen.tsx
+// ✅ Final version: supports multiple gifts via cartItems, with personal message
+
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -18,85 +21,119 @@ import { loadStripe } from "@stripe/stripe-js";
 import { ChevronLeft, Lock, CreditCard } from "lucide-react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { GiverStackParamList, Experience, ExperienceGift } from "../../types";
+import {
+  GiverStackParamList,
+  Experience,
+  ExperienceGift,
+  CartItem,
+} from "../../types";
+
 import { stripeService } from "../../services/stripeService";
+import { experienceService } from "../../services/ExperienceService";
 import { useApp } from "../../context/AppContext";
+import { useAuthGuard } from "../../hooks/useAuthGuard";
+import LoginPrompt from "../../components/LoginPrompt";
 import MainScreen from "../MainScreen";
 
 const stripePromise = loadStripe(process.env.EXPO_PUBLIC_STRIPE_PK!);
 
 type NavigationProp = NativeStackNavigationProp<GiverStackParamList, "ExperienceCheckout">;
 
-// API helper to check if gift was created
-const checkGiftCreation = async (paymentIntentId: string): Promise<ExperienceGift | null> => {
+type CheckoutInnerProps = {
+  clientSecret: string;
+  paymentIntentId: string;
+  cartItems: CartItem[];
+  cartExperiences: Experience[];
+  totalAmount: number;
+  totalQuantity: number;
+};
+
+// --- Storage helpers (web + native) ---
+const getStorageItem = async (key: string) => {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return localStorage.getItem(key);
+  }
+  return await AsyncStorage.getItem(key);
+};
+
+const setStorageItem = async (key: string, value: string) => {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    localStorage.setItem(key, value);
+  } else {
+    await AsyncStorage.setItem(key, value);
+  }
+};
+
+const removeStorageItem = async (key: string) => {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    localStorage.removeItem(key);
+  } else {
+    await AsyncStorage.removeItem(key);
+  }
+};
+
+// --- API helper to check if gifts were created ---
+const checkGiftCreation = async (paymentIntentId: string): Promise<ExperienceGift[]> => {
   try {
     const response = await fetch(
-      `https://europe-west1-ernit-3fc0b.cloudfunctions.net/getGiftByPaymentIntent?paymentIntentId=${paymentIntentId}`
+      `https://europe-west1-ernit-3fc0b.cloudfunctions.net/getGiftsByPaymentIntent_Test?paymentIntentId=${paymentIntentId}`
     );
-    
-    if (response.ok) {
-      const gift = await response.json();
-      return {
-        ...gift,
-        createdAt: new Date(gift.createdAt),
-        deliveryDate: new Date(gift.deliveryDate),
-        updatedAt: new Date(gift.updatedAt),
-      };
-    }
-    return null;
+    if (!response.ok) return [];
+
+    const gifts = await response.json();
+    console.log('gifts', gifts)
+    if (!Array.isArray(gifts)) return [];
+
+    return gifts.map((gift: any) => ({
+      ...gift,
+      createdAt: new Date(gift.createdAt),
+      deliveryDate: new Date(gift.deliveryDate),
+      updatedAt: new Date(gift.updatedAt),
+    }));
   } catch (error) {
-    console.error("Error checking gift creation:", error);
-    return null;
+    console.error("Error checking gifts:", error);
+    return [];
   }
 };
 
-// Poll for gift creation (webhook processing may take a moment)
-const pollForGift = async (
+// --- Poll for multiple gifts (for cart / Buy Now with quantity > 1) ---
+const pollForGifts = async (
   paymentIntentId: string,
-  maxAttempts: number = 10,
+  expectedCount: number,
+  maxAttempts: number = 12,
   delayMs: number = 1000
-): Promise<ExperienceGift | null> => {
+): Promise<ExperienceGift[]> => {
   for (let i = 0; i < maxAttempts; i++) {
-    const gift = await checkGiftCreation(paymentIntentId);
-    if (gift) {
-      return gift;
+    const gifts = await checkGiftCreation(paymentIntentId);
+
+    if (gifts.length === expectedCount) {
+      return gifts;
     }
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+    await new Promise((res) => setTimeout(res, delayMs));
   }
-  return null;
+  return [];
 };
 
-function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string; paymentIntentId: string }) {
-  const route = useRoute();
-  const { experience } = route.params as { experience: Experience };
+// ========== INNER CHECKOUT (inside <Elements>) ==========
+const CheckoutInner: React.FC<CheckoutInnerProps> = ({
+  clientSecret,
+  paymentIntentId,
+  cartItems,
+  cartExperiences,
+  totalAmount,
+  totalQuantity,
+}) => {
   const navigation = useNavigation<NavigationProp>();
-  const { state, dispatch } = useApp();
+  const { dispatch } = useApp();
 
   const stripe = useStripe();
   const elements = useElements();
 
-  const [message, setMessage] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [charCount, setCharCount] = useState(0);
   const [isCheckingRedirect, setIsCheckingRedirect] = useState(false);
 
-  // --- Storage helpers (web + native)
-  const getStorageItem = async (key: string) => {
-    if (Platform.OS === "web" && typeof window !== "undefined") return localStorage.getItem(key);
-    return await AsyncStorage.getItem(key);
-  };
-
-  const setStorageItem = async (key: string, value: string) => {
-    if (Platform.OS === "web" && typeof window !== "undefined") localStorage.setItem(key, value);
-    else await AsyncStorage.setItem(key, value);
-  };
-
-  const removeStorageItem = async (key: string) => {
-    if (Platform.OS === "web" && typeof window !== "undefined") localStorage.removeItem(key);
-    else await AsyncStorage.removeItem(key);
-  };
-
-  // --- Handle redirect-based payments (e.g. MB Way)
+  // --- Handle redirect-based flows (e.g. MB Way) ---
   useEffect(() => {
     const checkRedirectReturn = async () => {
       if (!stripe) return;
@@ -123,36 +160,41 @@ function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string
         const { paymentIntent, error } = await stripe.retrievePaymentIntent(redirectClientSecret);
         if (error) {
           console.error("Error retrieving payment intent:", error);
-          Alert.alert("Payment Verification Failed", "Could not verify payment. Please contact support if payment was deducted.");
+          Alert.alert(
+            "Payment Verification Failed",
+            "Could not verify payment. Please contact support if payment was deducted."
+          );
           setIsCheckingRedirect(false);
           return;
         }
 
         if (paymentIntent?.status === "succeeded") {
-          console.log("💰 Payment succeeded, checking for gift creation...");
-          
-          // Poll for gift creation (webhook may take a moment)
-          const gift = await pollForGift(paymentIntent.id);
-          
-          if (gift) {
-            console.log("✅ Gift found:", gift.id);
-            dispatch({ type: "SET_EXPERIENCE_GIFT", payload: gift });
-            
-            // Cleanup
+          console.log("💰 Payment succeeded after redirect, checking gifts...");
+          const gifts = await pollForGifts(paymentIntent.id, totalQuantity);
+
+          if (gifts.length === 1) {
+            dispatch({ type: "SET_EXPERIENCE_GIFT", payload: gifts[0] });
+            dispatch({ type: "CLEAR_CART" }); // ✅ Clear cart after successful purchase
             await removeStorageItem(`pending_payment_${clientSecret}`);
-            
-            // Clean URL
+
             if (Platform.OS === "web" && typeof window !== "undefined") {
               window.history.replaceState({}, document.title, window.location.pathname);
             }
-            
+
             Alert.alert("Success", "Your payment was processed successfully!");
-            navigation.navigate("Confirmation", { experienceGift: gift });
+            navigation.navigate("Confirmation", { experienceGift: gifts[0] });
+          } else if (gifts.length > 1) {
+            dispatch({ type: "CLEAR_CART" }); // ✅ Clear cart after successful purchase
+            await removeStorageItem(`pending_payment_${clientSecret}`);
+            if (Platform.OS === "web" && typeof window !== "undefined") {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            navigation.navigate("ConfirmationMultiple", { experienceGifts: gifts });
           } else {
-            console.warn("⚠️ Gift not found after polling");
+            console.warn("⚠️ Gifts not found after polling");
             Alert.alert(
               "Payment Processed",
-              "Your payment was successful. Your gift is being prepared and will be available shortly. Please check your email or contact support."
+              "Your payment was successful. Your gifts are being prepared and will be available shortly."
             );
           }
         } else if (paymentIntent?.status === "processing") {
@@ -176,14 +218,7 @@ function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string
 
     const timer = setTimeout(() => checkRedirectReturn(), 500);
     return () => clearTimeout(timer);
-  }, [stripe, clientSecret, navigation, dispatch]);
-
-  const handleMessageChange = (text: string) => {
-    if (text.length <= 500) {
-      setMessage(text);
-      setCharCount(text.length);
-    }
-  };
+  }, [stripe, clientSecret, navigation, dispatch, totalQuantity]);
 
   const handlePurchase = async () => {
     if (!stripe || !elements) {
@@ -192,32 +227,9 @@ function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string
     }
 
     setIsProcessing(true);
-
-    // Mark as pending payment
     await setStorageItem(`pending_payment_${clientSecret}`, "true");
 
     try {
-      // Update metadata with personalized message before confirming
-      // Note: This won't work directly in confirmPayment, so we need to update the PaymentIntent first
-      if (message) {
-        try {
-          // Call your backend to update the payment intent metadata
-          await fetch(
-            "https://europe-west1-ernit-3fc0b.cloudfunctions.net/updatePaymentIntentMetadata",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                paymentIntentId,
-                personalizedMessage: message,
-              }),
-            }
-          );
-        } catch (err) {
-          console.warn("Could not update message, proceeding anyway");
-        }
-      }
-
       const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
@@ -232,25 +244,25 @@ function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string
       if (error) throw error;
       if (!paymentIntent) throw new Error("No payment intent returned.");
 
-      // If payment succeeded instantly (no redirect)
       if (paymentIntent.status === "succeeded") {
-        console.log("💰 Payment succeeded immediately, checking for gift...");
-        
-        // Poll for gift creation
-        const gift = await pollForGift(paymentIntent.id);
-        
-        if (gift) {
-          console.log("✅ Gift found:", gift.id);
-          dispatch({ type: "SET_EXPERIENCE_GIFT", payload: gift });
+        console.log("💰 Payment succeeded immediately, checking gifts...");
+        const gifts = await pollForGifts(paymentIntent.id, totalQuantity);
+
+        if (gifts.length === 1) {
+          dispatch({ type: "SET_EXPERIENCE_GIFT", payload: gifts[0] });
+          dispatch({ type: "CLEAR_CART" }); // ✅ Clear cart after successful purchase
           await removeStorageItem(`pending_payment_${clientSecret}`);
-          
           Alert.alert("Success", "Your payment was processed successfully!");
-          navigation.navigate("Confirmation", { experienceGift: gift });
+          navigation.navigate("Confirmation", { experienceGift: gifts[0] });
+        } else if (gifts.length > 1) {
+          dispatch({ type: "CLEAR_CART" }); // ✅ Clear cart after successful purchase
+          await removeStorageItem(`pending_payment_${clientSecret}`);
+          navigation.navigate("ConfirmationMultiple", { experienceGifts: gifts });
         } else {
-          console.warn("⚠️ Gift not found after polling");
+          console.warn("⚠️ Gifts not found after polling");
           Alert.alert(
             "Payment Processed",
-            "Your payment was successful. Your gift is being prepared and will be available shortly."
+            "Your payment was successful. Your gifts are being prepared and will be available shortly."
           );
         }
       } else if (paymentIntent.status === "processing") {
@@ -259,7 +271,7 @@ function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string
           "Your payment is being processed. You will receive confirmation shortly."
         );
       }
-      // If redirect happened, useEffect will handle it
+      // If redirect happens, the useEffect above will handle it
     } catch (err: any) {
       await removeStorageItem(`pending_payment_${clientSecret}`);
       const errorMessage = err.message || "Something went wrong.";
@@ -300,34 +312,32 @@ function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
             {/* Summary */}
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>Your Experience</Text>
-              <Text style={styles.summaryTitle}>{experience.title}</Text>
-              <Text style={styles.subtitle}>{experience.subtitle}</Text>
+              <Text style={styles.summaryLabel}>Your Gifts</Text>
+
+              {cartItems.map((item) => {
+                const exp = cartExperiences.find((e) => e.id === item.experienceId);
+                if (!exp) return null;
+
+                return (
+                  <View key={item.experienceId} style={styles.summaryRow}>
+                    <View style={styles.summaryInfo}>
+                      <Text style={styles.summaryTitle}>{exp.title}</Text>
+                      {exp.subtitle && (
+                        <Text style={styles.subtitle}>{exp.subtitle}</Text>
+                      )}
+                      <Text style={styles.quantityText}>Qty: {item.quantity}</Text>
+                    </View>
+                    <Text style={styles.priceAmount}>
+                      €{(exp.price * item.quantity).toFixed(2)}
+                    </Text>
+                  </View>
+                );
+              })}
+
               <View style={styles.priceLine}>
                 <Text style={styles.priceLabel}>Total Amount</Text>
-                <Text style={styles.priceAmount}>€{experience.price.toFixed(2)}</Text>
+                <Text style={styles.priceAmount}>€{totalAmount.toFixed(2)}</Text>
               </View>
-            </View>
-
-            {/* Message */}
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Personal Message</Text>
-                <Text style={styles.charCounter}>{charCount}/500</Text>
-              </View>
-              <Text style={styles.sectionSubtitle}>
-                Make it special with a heartfelt message
-              </Text>
-              <TextInput
-                style={styles.messageInput}
-                placeholder="Share why this experience is perfect for them..."
-                placeholderTextColor="#9ca3af"
-                multiline
-                value={message}
-                onChangeText={handleMessageChange}
-                textAlignVertical="top"
-                maxLength={500}
-              />
             </View>
 
             {/* Payment */}
@@ -356,7 +366,7 @@ function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string
           <View style={styles.bottomBar}>
             <View style={styles.totalSection}>
               <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalAmount}>€{experience.price.toFixed(2)}</Text>
+              <Text style={styles.totalAmount}>€{totalAmount.toFixed(2)}</Text>
             </View>
             <TouchableOpacity
               style={[styles.payButton, isProcessing && styles.payButtonDisabled]}
@@ -375,41 +385,114 @@ function CheckoutInner({ clientSecret, paymentIntentId }: { clientSecret: string
       </KeyboardAvoidingView>
     </MainScreen>
   );
-}
+};
 
-export default function ExperienceCheckoutScreen() {
+// ========== OUTER WRAPPER (creates PaymentIntent & <Elements>) ==========
+const ExperienceCheckoutScreen: React.FC = () => {
   const route = useRoute();
-  const { experience } = route.params as { experience: Experience };
-  const { state } = useApp();
   const navigation = useNavigation<NavigationProp>();
+  const { state } = useApp();
+  const { requireAuth, showLoginPrompt, loginMessage, closeLoginPrompt } = useAuthGuard();
+
+  const { cartItems } = route.params as { cartItems: CartItem[] };
+
+  // Require authentication for checkout
+  useEffect(() => {
+    if (!state.user) {
+      requireAuth("Please log in to proceed to checkout.");
+    }
+  }, [state.user, requireAuth]);
 
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [cartExperiences, setCartExperiences] = useState<Experience[]>([]);
+  const [totalAmount, setTotalAmount] = useState(0);
+
+  const totalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
   useEffect(() => {
     const init = async () => {
       try {
-        // Create payment intent with full metadata
+        if (!cartItems || cartItems.length === 0) {
+          Alert.alert("Error", "Your cart is empty.");
+          navigation.goBack();
+          return;
+        }
+
+        // Load all experiences in cart
+        const list: Experience[] = [];
+        let total = 0;
+
+        for (const item of cartItems) {
+          const exp = await experienceService.getExperienceById(item.experienceId);
+          if (exp) {
+            list.push(exp);
+            total += exp.price * item.quantity;
+          }
+        }
+
+        if (list.length === 0) {
+          Alert.alert("Error", "Could not load experiences for checkout.");
+          navigation.goBack();
+          return;
+        }
+
+        setCartExperiences(list);
+        setTotalAmount(total);
+
+        const firstExp = list[0];
+
+        // Build cart metadata for backend
+        const cartMetadata = cartItems.map((item) => {
+          const exp = list.find((e) => e.id === item.experienceId);
+          return {
+            experienceId: item.experienceId,
+            partnerId: exp?.partnerId || firstExp.partnerId,
+            quantity: item.quantity,
+          };
+        });
+
+        // Create PaymentIntent with full metadata & aggregated total
         const response = await stripeService.createPaymentIntent(
-          experience.price,
-          experience.id,
+          total,
           state.user?.id || "",
           state.user?.displayName || "",
-          experience.partnerId,
-          "" // Message will be updated later
+          firstExp.partnerId,
+          cartMetadata,
+          "" // personalized message will be added on confirmation screen
         );
-        
+
         setClientSecret(response.clientSecret);
         setPaymentIntentId(response.paymentIntentId);
       } catch (err: any) {
-        Alert.alert("Error", err.message);
+        console.error("Error creating payment intent:", err);
+        Alert.alert("Error", err.message || "Failed to initialize payment.");
+        navigation.goBack();
       } finally {
         setLoading(false);
       }
     };
+
     init();
-  }, [experience]);
+  }, [cartItems, navigation, state.user]);
+
+  if (!state.user) {
+    return (
+      <MainScreen activeRoute="Home">
+        <LoginPrompt
+          visible={showLoginPrompt}
+          onClose={() => {
+            // Simply close the modal - no navigation
+            // User stays on the same page they were on
+            closeLoginPrompt();
+          }}
+          message={loginMessage}
+        />
+      </MainScreen>
+    );
+  }
 
   if (loading) {
     return (
@@ -436,30 +519,39 @@ export default function ExperienceCheckoutScreen() {
   }
 
   return (
-    <Elements 
-      stripe={stripePromise} 
-      options={{ 
+    <Elements
+      stripe={stripePromise}
+      options={{
         clientSecret,
         appearance: {
-          theme: 'stripe',
+          theme: "stripe",
           variables: {
-            colorPrimary: '#8b5cf6',
-            colorBackground: '#ffffff',
-            colorText: '#111827',
-            colorDanger: '#ef4444',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-            spacingUnit: '4px',
-            borderRadius: '8px',
+            colorPrimary: "#8b5cf6",
+            colorBackground: "#ffffff",
+            colorText: "#111827",
+            colorDanger: "#ef4444",
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            spacingUnit: "4px",
+            borderRadius: "8px",
           },
         },
       }}
     >
-      <CheckoutInner clientSecret={clientSecret} paymentIntentId={paymentIntentId} />
+      <CheckoutInner
+        clientSecret={clientSecret}
+        paymentIntentId={paymentIntentId}
+        cartItems={cartItems}
+        cartExperiences={cartExperiences}
+        totalAmount={totalAmount}
+        totalQuantity={totalQuantity}
+      />
     </Elements>
   );
-}
+};
 
-// --- Styles (same as before) ---
+export default ExperienceCheckoutScreen;
+
+// --- Styles (based on your original) ---
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fafb" },
   header: {
@@ -497,6 +589,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   scrollView: { flex: 1, paddingHorizontal: 20 },
+
   summaryCard: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -519,23 +612,37 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 8,
   },
-  summaryTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 6,
+  summaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
   },
-  subtitle: { fontSize: 16, color: "#6b7280", marginBottom: 20 },
+  summaryInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  subtitle: { fontSize: 14, color: "#6b7280", marginTop: 2 },
+  quantityText: {
+    marginTop: 4,
+    fontSize: 13,
+    color: "#4b5563",
+  },
   priceLine: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#e5e7eb",
   },
   priceLabel: { fontSize: 16, color: "#6b7280", fontWeight: "600" },
-  priceAmount: { fontSize: 24, fontWeight: "700", color: "#8b5cf6" },
+  priceAmount: { fontSize: 18, fontWeight: "700", color: "#8b5cf6" },
+
   section: { marginBottom: 28 },
   sectionHeader: {
     flexDirection: "row",
@@ -545,22 +652,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
   sectionSubtitle: { fontSize: 14, color: "#6b7280", marginBottom: 12 },
-  charCounter: { fontSize: 14, color: "#9ca3af", fontWeight: "500" },
-  messageInput: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: "#111827",
-    minHeight: 120,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
-  },
+
   paymentBox: {
     backgroundColor: "#fff",
     borderRadius: 12,
@@ -585,6 +677,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   securityText: { fontSize: 13, color: "#6b7280", fontWeight: "500" },
+
   bottomBar: {
     position: "absolute",
     bottom: 0,
@@ -623,6 +716,7 @@ const styles = StyleSheet.create({
   },
   payButtonDisabled: { opacity: 0.6 },
   payButtonText: { color: "#fff", fontSize: 18, fontWeight: "700" },
+
   loadingContainer: {
     flex: 1,
     justifyContent: "center",

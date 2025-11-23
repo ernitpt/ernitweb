@@ -1,11 +1,15 @@
-import {setGlobalOptions} from "firebase-functions";
-import {aiGenerateHint} from "./aiGenerateHint";
-import {stripeCreatePaymentIntent} from "./stripeCreatePaymentIntent";
-import {getGiftByPaymentIntent} from "./getGiftByPaymentIntent";
-import {stripeWebhook} from "./stripeWebhook";
-import {updatePaymentIntentMetadata} from "./updatePaymentIntentMetadata";
-import { exportFirestore } from "./exportFirestore";
+import { setGlobalOptions } from "firebase-functions";
+import { aiGenerateHint } from "./aiGenerateHint";
+import { stripeCreatePaymentIntent } from "./stripeCreatePaymentIntent";
+import { getGiftsByPaymentIntent } from "./getGiftsByPaymentIntent";
+import { stripeWebhook } from "./stripeWebhook";
+import { updatePaymentIntentMetadata } from "./updatePaymentIntentMetadata";
+import { getFirestore } from "firebase-admin/firestore";
+import * as admin from 'firebase-admin';
 
-setGlobalOptions({maxInstances: 10});
+admin.initializeApp();
 
-export {aiGenerateHint, stripeCreatePaymentIntent, getGiftByPaymentIntent, stripeWebhook, updatePaymentIntentMetadata, exportFirestore};
+setGlobalOptions({ maxInstances: 10 });
+export const db = getFirestore();
+
+export { aiGenerateHint, stripeCreatePaymentIntent, getGiftsByPaymentIntent, stripeWebhook, updatePaymentIntentMetadata };

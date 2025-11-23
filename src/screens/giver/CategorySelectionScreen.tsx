@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,9 +18,12 @@ import MainScreen from '../MainScreen'; // Assuming this path is correct
 import { getAuth } from 'firebase/auth';
 import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../services/firebase'; // Assuming this path is correct
-import { Heart } from 'lucide-react-native';
+import { Heart, ShoppingCart, LogIn } from 'lucide-react-native';
 // This is required for the gradient text effect
 import MaskedView from '@react-native-masked-view/masked-view';
+import { useApp } from '../../context/AppContext';
+import { cartService } from '../../services/CartService';
+import { RootStackParamList } from '../../types';
 
 // Mocking types for the example
 type ExperienceCategory = 'adventure' | 'wellness' | 'food-culture' | 'entertainment';
@@ -36,11 +39,13 @@ type Experience = {
 type GiverStackParamList = {
   CategorySelection: undefined;
   ExperienceDetails: { experience: Experience };
+  ExperienceCheckout: { experience?: Experience; cartItems?: any[] };
 };
 // End of mock types
 
 type Category = { id: ExperienceCategory; title: string; experiences: Experience[] };
 type GiverNavigationProp = NativeStackNavigationProp<GiverStackParamList, 'CategorySelection'>;
+type RootNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const ExperienceCard = ({
   experience,
@@ -141,7 +146,11 @@ const CategoryCarousel = ({
 );
 
 const CategorySelectionScreen = () => {
+  console.log('[CategorySelectionScreen] Rendering...');
   const navigation = useNavigation<GiverNavigationProp>();
+  const rootNavigation = useNavigation<RootNavigationProp>();
+  const { state, dispatch } = useApp();
+  console.log('[CategorySelectionScreen] State loaded:', { hasUser: !!state?.user, hasState: !!state });
   const [searchQuery, setSearchQuery] = useState('');
   const [wishlist, setWishlist] = useState<string[]>([]);
   const [categoriesWithExperiences, setCategories] = useState<Category[]>([]);
@@ -149,13 +158,53 @@ const CategorySelectionScreen = () => {
 
   const auth = getAuth();
   const user = auth.currentUser;
+  const isAuthenticated = !!state.user;
+
+  // Calculate cart item count (from user cart or guest cart)
+  const currentCart = state.user?.cart || state.guestCart || [];
+  const cartItemCount = currentCart.reduce((total, item) => total + item.quantity, 0) || 0;
+
+  // Save guest cart to local storage whenever it changes
+  // Use a ref to track previous cart to avoid unnecessary saves
+  const prevCartRef = useRef<string>('');
+  useEffect(() => {
+    if (!state.user && state.guestCart) {
+      const cartString = JSON.stringify(state.guestCart);
+      // Only save if cart actually changed
+      if (cartString !== prevCartRef.current) {
+        prevCartRef.current = cartString;
+        cartService.saveGuestCart(state.guestCart);
+      }
+    }
+  }, [state.guestCart, state.user]);
+
+  // Load guest cart from storage on mount if not authenticated
+  useEffect(() => {
+    const loadGuestCart = async () => {
+      if (!state.user) {
+        const guestCart = await cartService.getGuestCart();
+        if (guestCart.length > 0) {
+          dispatch({ type: 'SET_CART', payload: guestCart });
+        }
+      }
+    };
+    loadGuestCart();
+  }, []);
+
+  const handleCartPress = () => {
+    navigation.navigate('Cart' as any);
+  };
+
+  const handleSignInPress = () => {
+    rootNavigation.navigate('Auth' as any);
+  };
 
   // Load experiences from Firestore
   useEffect(() => {
     const fetchExperiences = async () => {
       try {
         const snapshot = await getDocs(collection(db, 'experiences'));
-        const allExperiences = snapshot.docs.map((doc) => doc.data() as Experience); 
+        const allExperiences = snapshot.docs.map((doc) => doc.data() as Experience);
 
         const grouped = allExperiences.reduce((acc, exp) => {
           if (!acc[exp.category]) acc[exp.category] = [];
@@ -169,10 +218,10 @@ const CategorySelectionScreen = () => {
             cat === 'adventure'
               ? 'Adventure'
               : cat === 'relaxation'
-              ? 'Wellness'
-              : cat === 'creative'
-              ? 'Creative'
-              : 'Entertainment',
+                ? 'Wellness'
+                : cat === 'creative'
+                  ? 'Creative'
+                  : 'Entertainment',
           experiences: grouped[cat as ExperienceCategory],
         }));
 
@@ -191,12 +240,18 @@ const CategorySelectionScreen = () => {
   useFocusEffect(
     useCallback(() => {
       const fetchWishlist = async () => {
-        if (!user) return;
+        if (!user) {
+          // Clear wishlist when user logs out
+          setWishlist([]);
+          return;
+        }
         const userRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userRef);
         if (userSnap.exists()) {
           const data = userSnap.data();
           setWishlist(data.wishlist || []);
+        } else {
+          setWishlist([]);
         }
       };
 
@@ -205,7 +260,7 @@ const CategorySelectionScreen = () => {
   );
 
   const toggleWishlist = async (experienceId: string) => {
-    if (!user) {
+    if (!user || !state.user) {
       Alert.alert('Please log in to use wishlist.');
       return;
     }
@@ -261,8 +316,35 @@ const CategorySelectionScreen = () => {
               > */}
       <LinearGradient colors={headerColors} style={styles.gradientHeader}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Find an Experience</Text>
-          <Text style={styles.headerSubtitle}>Select a gift they'll never forget</Text>
+          <View style={styles.headerTop}>
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>Find an Experience</Text>
+              <Text style={styles.headerSubtitle}>Select a gift they'll never forget</Text>
+            </View>
+            <View style={styles.headerButtons}>
+              {!isAuthenticated && (
+                <TouchableOpacity
+                  onPress={handleSignInPress}
+                  style={styles.signInButton}
+                >
+                  <LogIn color="#fff" size={20} />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                onPress={handleCartPress}
+                style={styles.cartButton}
+              >
+                <ShoppingCart color="#fff" size={24} />
+                {cartItemCount > 0 && (
+                  <View style={styles.cartBadge}>
+                    <Text style={styles.cartBadgeText}>
+                      {cartItemCount > 9 ? "9+" : cartItemCount}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
 
           <View style={styles.searchBar}>
             <Text style={styles.searchIcon}>🔍</Text>
@@ -315,6 +397,16 @@ const styles = StyleSheet.create({
     // paddingTop: 16,
     paddingBottom: 10,
   },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  headerTextContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
   headerTitle: {
     fontSize: 26,
     fontWeight: 'bold',
@@ -324,7 +416,58 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 15,
     color: '#e0e7ff',
-    marginBottom: 12,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  signInButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  adminButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  adminButtonText: {
+    fontSize: 20,
+  },
+  cartButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  cartBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   searchBar: {
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
@@ -395,36 +538,36 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   cardContent: {
-  padding: 10,
-  height: 90, // fixed consistent text+price zone
-  justifyContent: "space-between",
-},
+    padding: 10,
+    height: 90, // fixed consistent text+price zone
+    justifyContent: "space-between",
+  },
 
-textBlock: {
-  height: 64, // consistent space for title + subtitle (2 lines each)
-  overflow: "hidden",
-},
+  textBlock: {
+    height: 64, // consistent space for title + subtitle (2 lines each)
+    overflow: "hidden",
+  },
 
-cardTitle: {
-  color: "#111827",
-  fontWeight: "bold",
-  fontSize: 15,
-  lineHeight: 18,
-},
+  cardTitle: {
+    color: "#111827",
+    fontWeight: "bold",
+    fontSize: 15,
+    lineHeight: 18,
+  },
 
-cardSubtitle: {
-  color: "#6b7280",
-  fontSize: 13,
-  lineHeight: 17,
-  marginTop: 2,
-},
+  cardSubtitle: {
+    color: "#6b7280",
+    fontSize: 13,
+    lineHeight: 17,
+    marginTop: 2,
+  },
 
-cardPrice: {
-  color: "#166534",
-  fontSize: 14,
-  fontWeight: "bold",
-  textAlign: "right",
-},
+  cardPrice: {
+    color: "#166534",
+    fontSize: 14,
+    fontWeight: "bold",
+    textAlign: "right",
+  },
 
   loadingContainer: {
     flex: 1,

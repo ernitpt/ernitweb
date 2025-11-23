@@ -2,6 +2,12 @@ import { NavigatorScreenParams } from '@react-navigation/native';
 import { Timestamp } from 'firebase/firestore';
 
 
+// Cart item type
+export interface CartItem {
+  experienceId: string;
+  quantity: number;
+}
+
 // User types
 export interface User {
   id: string;
@@ -11,6 +17,8 @@ export interface User {
   createdAt: Date;
   profile?: UserProfile;
   wishlist: Experience[];
+  cart?: CartItem[];
+  onboardingStatus?: 'not_started' | 'completed' | 'skipped';
 }
 
 // User Profile types
@@ -97,7 +105,10 @@ export interface ExperienceGift {
   claimedAt?: Date;
   completedAt?: Date;
   claimCode: string;
+  expiresAt?: Date; // ✅ Claim code expiration date
   partnerId?: string;
+  paymentIntentId?: string;
+  updatedAt?: Date;
 }
 
 export interface Goal {
@@ -136,11 +147,22 @@ export interface Goal {
   completedAt?: Date;
   revealedAt?: Date;
   segments: GoalSegment[];
-    hints?: {
+  hints?: {
     session: number;
     hint: string;
     date: number; // timestamp
   }[];
+  // Goal approval fields
+  approvalStatus?: 'pending' | 'approved' | 'suggested_change';
+  initialTargetCount?: number; // Original goal weeks
+  initialSessionsPerWeek?: number; // Original sessions per week
+  suggestedTargetCount?: number; // Giver's suggested weeks
+  suggestedSessionsPerWeek?: number; // Giver's suggested sessions per week
+  approvalRequestedAt?: Date;
+  approvalDeadline?: Date; // 24h from request
+  giverMessage?: string; // Message from giver when approving/suggesting
+  receiverMessage?: string; // Message from receiver when responding
+  giverActionTaken?: boolean; // Ensure giver can only act once
 }
 
 
@@ -197,9 +219,10 @@ export interface Notification {
   userId: string; // The person who will see this notification
   title: string;
   message: string;
-  type: 'gift_received' | 'goal_set' | 'goal_completed' | 'goal_progress' | 'friend_request';
+  type: 'gift_received' | 'goal_set' | 'goal_completed' | 'goal_progress' | 'friend_request' | 'goal_approval_request' | 'goal_change_suggested' | 'goal_approval_response';
   read: boolean;
-  createdAt:  Date | Timestamp;
+  createdAt: Date | Timestamp;
+  clearable?: boolean; // Whether notification can be cleared (default true)
   data?: {
     giftId?: string;
     goalId?: string;
@@ -210,6 +233,13 @@ export interface Notification {
     senderName?: string;
     senderProfileImageUrl?: string;
     senderCountry?: string;
+    // Approval-related fields
+    initialTargetCount?: number;
+    initialSessionsPerWeek?: number;
+    suggestedTargetCount?: number;
+    suggestedSessionsPerWeek?: number;
+    giverMessage?: string;
+    receiverMessage?: string;
   };
 }
 
@@ -228,14 +258,15 @@ export interface Hint {
 
 // Navigation types
 export type RootStackParamList = {
+  Onboarding: undefined;
   Landing: undefined;
-  Auth: { mode?: 'signin' | 'signup' };
+  Auth: { mode?: 'signin' | 'signup'; fromModal?: boolean };
   CategorySelection: undefined;
   // Main: undefined;
   Profile: undefined;
   Roadmap: { goal: Goal };
   Goals: undefined;
-  ExperienceCheckout: { experience: Experience };
+  ExperienceCheckout: { experience?: Experience; cartItems?: CartItem[] };
   ExperienceDetails: { experience: Experience };
   GoalDetail: { goalId: string };
   Completion: { goal: Goal; experienceGift: ExperienceGift };
@@ -246,19 +277,24 @@ export type RootStackParamList = {
   AddFriend: undefined;
   FriendProfile: { userId: string };
   FriendsList: undefined;
+  Cart: undefined;
   PurchasedGifts: undefined;
   Confirmation: { experienceGift: ExperienceGift };
+  ConfirmationMultiple: { experienceGifts: ExperienceGift[] };
+  LoginPromptModal: undefined;
 };
 
 export type GiverStackParamList = {
   CategorySelection: undefined;
   ExperienceDetails: { experience: Experience };
-  ExperienceCheckout: { experience: Experience };
+  ExperienceCheckout: { experience?: Experience; cartItems?: CartItem[] };
   Confirmation: { experienceGift: ExperienceGift };
+  Cart: undefined;
+  ConfirmationMultiple: { experienceGifts: ExperienceGift[] };
 };
 
 export type RecipientStackParamList = {
-  CouponEntry: undefined;
+  CouponEntry: { code?: string } | undefined;
   GoalSetting: { experienceGift: ExperienceGift };
   Roadmap: { goal: Goal };
   Goals: undefined;

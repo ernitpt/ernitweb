@@ -230,6 +230,24 @@ const experiences = [
     price: 45,
     createdAt: new Date(),
   },
+  {
+    id: "wel3",
+    partnerId: "ION490slREPpWJNNKvb5RRtuq033",
+    title: "Therapeutic / Sports Massage",
+    subtitle: "Muscura Aura, Lisbon",
+    description:
+      "A personalized treatment for full-body recovery — choose between a Therapeutic Sports Massage for deep relief or a Relaxation Massage for calm and re-ease.\n\n"
+      + "👐 Techniques: Shiatsu, Thai massage, trigger point therapy\n⏱ Duration: 50 minutes\n💙 Perfect for: Anyone who’s been active, focused, or needs deep care.",
+    category: "relaxation",
+    imageUrl: [
+      "https://firebasestorage.googleapis.com/v0/b/ernit-3fc0b.firebasestorage.app/o/experiences%2Fwellness%2Frelax%20massage%2Fmassage_1.jpg?alt=media&token=d7fbd268-ed5e-49d7-a0ea-2a7e504993f0",
+      "https://firebasestorage.googleapis.com/v0/b/ernit-3fc0b.firebasestorage.app/o/experiences%2Fwellness%2Frelax%20massage%2Fmassage_2.jpg?alt=media&token=abc1d287-3eae-47be-9f80-4c7ece94f930"
+    ],
+    coverImageUrl: "https://firebasestorage.googleapis.com/v0/b/ernit-3fc0b.firebasestorage.app/o/experiences%2Fwellness%2Frelax%20massage%2Fmassage_1.jpg?alt=media&token=d7fbd268-ed5e-49d7-a0ea-2a7e504993f0",
+    price: 45,
+    createdAt: new Date(),
+  },
+
   // Creative
    {
     id: "cre1",

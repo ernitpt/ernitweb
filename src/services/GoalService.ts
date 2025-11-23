@@ -40,6 +40,8 @@ function normalizeGoal(g: any): Goal {
   const startDate = toJSDate(g.startDate) ?? new Date();
   const endDate = toJSDate(g.endDate) ?? addDaysSafe(startDate, 7);
   const weekStartAt = toJSDate(g.weekStartAt);
+  const approvalRequestedAt = toJSDate(g.approvalRequestedAt);
+  const approvalDeadline = toJSDate(g.approvalDeadline);
 
   return {
     ...g,
@@ -53,6 +55,17 @@ function normalizeGoal(g: any): Goal {
     isCompleted: !!g.isCompleted,
     isWeekCompleted: !!g.isWeekCompleted, // new flag
     updatedAt: toJSDate(g.updatedAt) ?? new Date(),
+    // Approval fields
+    approvalStatus: g.approvalStatus || 'pending',
+    initialTargetCount: typeof g.initialTargetCount === 'number' ? g.initialTargetCount : g.targetCount,
+    initialSessionsPerWeek: typeof g.initialSessionsPerWeek === 'number' ? g.initialSessionsPerWeek : g.sessionsPerWeek,
+    suggestedTargetCount: typeof g.suggestedTargetCount === 'number' ? g.suggestedTargetCount : null,
+    suggestedSessionsPerWeek: typeof g.suggestedSessionsPerWeek === 'number' ? g.suggestedSessionsPerWeek : null,
+    approvalRequestedAt: approvalRequestedAt ?? null,
+    approvalDeadline: approvalDeadline ?? null,
+    giverMessage: g.giverMessage || null,
+    receiverMessage: g.receiverMessage || null,
+    giverActionTaken: !!g.giverActionTaken,
   } as Goal;
 }
 
@@ -95,11 +108,14 @@ export class GoalService {
   /** Real-time listener */
   listenToUserGoals(userId: string, cb: (goals: Goal[]) => void) {
     const qy = query(this.goalsCollection, where('userId', '==', userId));
-    const unsub = onSnapshot(qy, (snap) => {
-      const goals = snap.docs.map((d) => {
-        const data = normalizeGoal({ id: d.id, ...d.data() });
-        return data;
-      });
+    const unsub = onSnapshot(qy, async (snap) => {
+      const goals = await Promise.all(
+        snap.docs.map(async (d) => {
+          const data = normalizeGoal({ id: d.id, ...d.data() });
+          // Apply week sweep to ensure isWeekCompleted is current
+          return await this.applyExpiredWeeksSweep(data);
+        })
+      );
       cb(goals);
     });
     return unsub;
@@ -109,14 +125,23 @@ export class GoalService {
   async getUserGoals(userId: string): Promise<Goal[]> {
     const qy = query(this.goalsCollection, where('userId', '==', userId));
     const snap = await getDocs(qy);
-    return snap.docs.map((d) => normalizeGoal({ id: d.id, ...d.data() }));
+    const goals = await Promise.all(
+      snap.docs.map(async (d) => {
+        const data = normalizeGoal({ id: d.id, ...d.data() });
+        // Apply week sweep to ensure isWeekCompleted is current
+        return await this.applyExpiredWeeksSweep(data);
+      })
+    );
+    return goals;
   }
 
   async getGoalById(goalId: string): Promise<Goal | null> {
     const ref = doc(db, 'goals', goalId);
     const s = await getDoc(ref);
     if (!s.exists()) return null;
-    return normalizeGoal({ id: s.id, ...s.data() });
+    const data = normalizeGoal({ id: s.id, ...s.data() });
+    // Apply week sweep to ensure isWeekCompleted is current
+    return await this.applyExpiredWeeksSweep(data);
   }
 
   async appendHint(goalId: string, hintObj: { session: number; hint: string; date: number }) {
@@ -176,9 +201,9 @@ export class GoalService {
   }
 
   /** Handle expired or completed weeks */
-  private applyExpiredWeeksSweep(goal: Goal): Goal {
+  async applyExpiredWeeksSweep(goal: Goal): Promise<Goal> {
     let g = normalizeGoal(goal);
-    if (!g.weekStartAt) return g;
+    if (!g.weekStartAt || !g.id) return g;
 
     let anchor = new Date(g.weekStartAt);
     const now = new Date();
@@ -196,6 +221,17 @@ export class GoalService {
       g.weeklyCount = 0;
       g.weeklyLogDates = [];
       g.isWeekCompleted = false;
+
+      // Persist the week rollover to database
+      const ref = doc(db, 'goals', g.id);
+      await updateDoc(ref, {
+        currentCount: g.currentCount,
+        weekStartAt: anchor,
+        weeklyCount: 0,
+        weeklyLogDates: [],
+        isWeekCompleted: false,
+        updatedAt: serverTimestamp(),
+      } as any);
     }
 
     return g;
@@ -217,7 +253,7 @@ export class GoalService {
     }
 
     // Sweep expired weeks
-    g = this.applyExpiredWeeksSweep(g);
+    g = await this.applyExpiredWeeksSweep(g);
 
     const todayIso = isoDateOnly(new Date());
 
@@ -258,6 +294,122 @@ export class GoalService {
     } as any);
 
     return { ...(g as any) } as Goal;
+  }
+
+  /** Approve a goal */
+  async approveGoal(goalId: string, message?: string): Promise<Goal> {
+    const ref = doc(db, 'goals', goalId);
+    const updates: any = {
+      approvalStatus: 'approved',
+      giverMessage: message || '',
+      giverActionTaken: true,
+      updatedAt: serverTimestamp(),
+    };
+    await updateDoc(ref, updates);
+    const snap = await getDoc(ref);
+    return normalizeGoal({ id: snap.id, ...snap.data() });
+  }
+
+  /** Suggest a goal change */
+  async suggestGoalChange(
+    goalId: string,
+    suggestedTargetCount: number,
+    suggestedSessionsPerWeek: number,
+    message?: string
+  ): Promise<Goal> {
+    // Validate maximum limits: 5 weeks and 7 sessions per week
+    if (suggestedTargetCount > 5) {
+      throw new Error('The maximum duration is 5 weeks.');
+    }
+    if (suggestedSessionsPerWeek > 7) {
+      throw new Error('The maximum is 7 sessions per week.');
+    }
+
+    const ref = doc(db, 'goals', goalId);
+    const updates: any = {
+      approvalStatus: 'suggested_change',
+      suggestedTargetCount,
+      suggestedSessionsPerWeek,
+      giverMessage: message || '',
+      giverActionTaken: true,
+      updatedAt: serverTimestamp(),
+    };
+    await updateDoc(ref, updates);
+    const snap = await getDoc(ref);
+    return normalizeGoal({ id: snap.id, ...snap.data() });
+  }
+
+  /** Receiver responds to suggestion - accepts or changes goal */
+  async respondToGoalSuggestion(
+    goalId: string,
+    newTargetCount: number,
+    newSessionsPerWeek: number,
+    message?: string
+  ): Promise<Goal> {
+    const ref = doc(db, 'goals', goalId);
+    const goalSnap = await getDoc(ref);
+    if (!goalSnap.exists()) throw new Error('Goal not found');
+    const currentGoal = normalizeGoal({ id: goalSnap.id, ...goalSnap.data() });
+
+    // Ensure new goal is not less than initial
+    const minTargetCount = currentGoal.initialTargetCount || currentGoal.targetCount;
+    const minSessionsPerWeek = currentGoal.initialSessionsPerWeek || currentGoal.sessionsPerWeek;
+
+    if (newTargetCount < minTargetCount || newSessionsPerWeek < minSessionsPerWeek) {
+      throw new Error('New goal cannot be less than the original goal');
+    }
+
+    // Validate maximum limits: 5 weeks and 7 sessions per week
+    if (newTargetCount > 5) {
+      throw new Error('The maximum duration is 5 weeks.');
+    }
+    if (newSessionsPerWeek > 7) {
+      throw new Error('The maximum is 7 sessions per week.');
+    }
+
+    // Update goal with new values
+    const now = new Date();
+    const durationInDays = newTargetCount * 7;
+    // Ensure startDate is a Date object
+    const startDate = toJSDate(currentGoal.startDate) || new Date();
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + durationInDays);
+
+    const updates: any = {
+      approvalStatus: 'approved',
+      targetCount: newTargetCount,
+      sessionsPerWeek: newSessionsPerWeek,
+      duration: durationInDays,
+      endDate,
+      receiverMessage: message || '',
+      updatedAt: serverTimestamp(),
+    };
+    await updateDoc(ref, updates);
+    const snap = await getDoc(ref);
+    return normalizeGoal({ id: snap.id, ...snap.data() });
+  }
+
+  /** Auto-approve goal if deadline passed */
+  async checkAndAutoApprove(goalId: string): Promise<Goal | null> {
+    const ref = doc(db, 'goals', goalId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return null;
+    const goal = normalizeGoal({ id: snap.id, ...snap.data() });
+
+    if (goal.approvalStatus === 'pending' && goal.approvalDeadline) {
+      const now = new Date();
+      if (now >= goal.approvalDeadline && !goal.giverActionTaken) {
+        // Auto-approve
+        await updateDoc(ref, {
+          approvalStatus: 'approved',
+          giverActionTaken: true,
+          updatedAt: serverTimestamp(),
+        } as any);
+        const updatedSnap = await getDoc(ref);
+        return normalizeGoal({ id: updatedSnap.id, ...updatedSnap.data() });
+      }
+    }
+    return null;
   }
 }
 

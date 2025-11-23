@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, ReactNode } from 'react';
-import { User, ExperienceGift, Goal, Hint } from '../types';
+import { User, ExperienceGift, Goal, Hint, CartItem } from '../types';
 
 interface GoalTimerState {
   startedAt: number;
@@ -10,6 +10,7 @@ interface GoalTimerState {
 // State interface
 interface AppState {
   user: User | null;
+  guestCart?: CartItem[]; // Cart for unauthenticated users
   currentExperienceGift: ExperienceGift | null;
   currentGoal: Goal | null;
   hints: Hint[];
@@ -29,6 +30,7 @@ type AppAction =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'UPDATE_GOAL_PROGRESS'; payload: { goalId: string; currentCount: number } }
+  | { type: 'SET_CART'; payload: CartItem[] }
   | {
       type: 'UPDATE_GOAL_WEEKLY';
       payload: {
@@ -41,11 +43,16 @@ type AppAction =
     }
   | { type: 'START_GOAL_TIMER'; payload: { goalId: string; startedAt: number; elapsedBeforePause?: number } }
   | { type: 'CLEAR_GOAL_TIMER'; payload: { goalId: string } }
+  | { type: 'ADD_TO_CART'; payload: CartItem }
+  | { type: 'REMOVE_FROM_CART'; payload: { experienceId: string } }
+  | { type: 'UPDATE_CART_ITEM'; payload: { experienceId: string; quantity: number } }
+  | { type: 'CLEAR_CART' }
   | { type: 'RESET_STATE' };
 
 // Initial state
 const initialState: AppState = {
   user: null,
+  guestCart: [],
   currentExperienceGift: null,
   currentGoal: null,
   hints: [],
@@ -58,7 +65,12 @@ const initialState: AppState = {
 const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
     case 'SET_USER':
-      return { ...state, user: action.payload };
+      return { 
+        ...state, 
+        user: action.payload,
+        // Clear guest cart when user logs in (it will be merged)
+        guestCart: action.payload ? undefined : state.guestCart,
+      };
 
     case 'SET_EXPERIENCE_GIFT':
       return { ...state, currentExperienceGift: action.payload };
@@ -132,6 +144,163 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     }
 
+    case 'ADD_TO_CART': {
+      // Get current cart (user cart or guest cart)
+      const existingCart = state.user?.cart || state.guestCart || [];
+      const existingItemIndex = existingCart.findIndex(
+        (item) => item.experienceId === action.payload.experienceId
+      );
+
+      let newCart: CartItem[];
+      if (existingItemIndex >= 0) {
+        // Update quantity if item already exists
+        newCart = existingCart.map((item, index) =>
+          index === existingItemIndex
+            ? { ...item, quantity: item.quantity + action.payload.quantity }
+            : item
+        );
+      } else {
+        // Add new item
+        newCart = [...existingCart, action.payload];
+      }
+
+      // If user is logged in, update user cart
+      if (state.user) {
+        return {
+          ...state,
+          user: {
+            ...state.user,
+            cart: newCart,
+          },
+        };
+      }
+      
+      // For guest users, store cart in state and save to local storage immediately
+      // Save synchronously for web, async for native
+      if (typeof window !== 'undefined') {
+        // Web: save immediately
+        try {
+          localStorage.setItem('guest_cart', JSON.stringify(newCart));
+        } catch (error) {
+          console.error('Error saving guest cart:', error);
+        }
+      } else {
+        // Native: will be saved by useEffect in components
+      }
+      
+      return {
+        ...state,
+        guestCart: newCart,
+      };
+    }
+
+    case 'REMOVE_FROM_CART': {
+      const existingCart = state.user?.cart || state.guestCart || [];
+      const newCart = existingCart.filter(
+        (item) => item.experienceId !== action.payload.experienceId
+      );
+
+      if (state.user) {
+        return {
+          ...state,
+          user: {
+            ...state.user,
+            cart: newCart,
+          },
+        };
+      }
+      
+      // Save guest cart immediately for web
+      if (!state.user && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('guest_cart', JSON.stringify(newCart));
+        } catch (error) {
+          console.error('Error saving guest cart:', error);
+        }
+      }
+      
+      return {
+        ...state,
+        guestCart: newCart,
+      };
+    }
+
+    case 'UPDATE_CART_ITEM': {
+      const existingCart = state.user?.cart || state.guestCart || [];
+      const newCart = existingCart.map((item) =>
+        item.experienceId === action.payload.experienceId
+          ? { ...item, quantity: action.payload.quantity }
+          : item
+      );
+
+      if (state.user) {
+        return {
+          ...state,
+          user: {
+            ...state.user,
+            cart: newCart,
+          },
+        };
+      }
+      
+      // Save guest cart immediately for web
+      if (!state.user && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('guest_cart', JSON.stringify(newCart));
+        } catch (error) {
+          console.error('Error saving guest cart:', error);
+        }
+      }
+      
+      return {
+        ...state,
+        guestCart: newCart,
+      };
+    }
+
+    case 'CLEAR_CART': {
+      if (state.user) {
+        return {
+          ...state,
+          user: {
+            ...state.user,
+            cart: [],
+          },
+        };
+      }
+      
+      return {
+        ...state,
+        guestCart: [],
+      };
+    }
+    
+    case "SET_CART": {
+      if (state.user) {
+        return {
+          ...state,
+          user: {
+            ...state.user,
+            cart: action.payload,
+          },
+        };
+      }
+      
+      // Save guest cart immediately for web
+      if (!state.user && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('guest_cart', JSON.stringify(action.payload));
+        } catch (error) {
+          console.error('Error saving guest cart:', error);
+        }
+      }
+      
+      return {
+        ...state,
+        guestCart: action.payload,
+      };
+    }
+    
     case 'RESET_STATE':
       return initialState;
 
@@ -148,7 +317,10 @@ const AppContext = createContext<{
 
 // Provider component
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  console.log('[AppProvider] Initializing context...');
   const [state, dispatch] = useReducer(appReducer, initialState);
+  
+  console.log('[AppProvider] Initial state:', { hasUser: !!state?.user, guestCartLength: state?.guestCart?.length || 0 });
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
