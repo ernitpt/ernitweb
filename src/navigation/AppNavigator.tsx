@@ -105,9 +105,17 @@ const AppNavigatorContent = ({ initialRoute }: { initialRoute: 'Onboarding' | 'C
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
   const [isNavigationReady, setIsNavigationReady] = useState(false);
 
-  // Reset URL to root on web refresh (except for checkout and URLs with query params)
+  // Set document title immediately on component mount (for web)
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    document.title = 'Ernit';
+  }
+
+  // Reset URL and navigate to homepage on web refresh
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // Always set document title to "Ernit"
+      document.title = 'Ernit';
+
       const pathname = window.location.pathname;
       const hasQueryParams = window.location.search.length > 0;
 
@@ -122,8 +130,12 @@ const AppNavigatorContent = ({ initialRoute }: { initialRoute: 'Onboarding' | 'C
         hasQueryParams;
 
       if (!shouldNotReset) {
-        console.log('🔄 Resetting URL from', pathname, 'to root');
-        window.history.replaceState({}, '', '/');
+        console.log('🔄 Resetting URL from', pathname, 'to homepage');
+        window.history.replaceState({}, 'Ernit', '/');
+        // Navigate to CategorySelection (homepage) after navigation is ready
+        if (navigationRef.current) {
+          navigationRef.current.navigate('CategorySelection');
+        }
       }
     }
   }, []);
@@ -152,6 +164,37 @@ const AppNavigatorContent = ({ initialRoute }: { initialRoute: 'Onboarding' | 'C
       console.log('✅ Staying on CategorySelection');
     }
   }, [initialRoute, isNavigationReady]);
+
+  // Force document title to always be "Ernit" - prevent React Navigation from changing it
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+
+    // Set initial title
+    document.title = 'Ernit';
+
+    // Create a MutationObserver to watch for title changes
+    const observer = new MutationObserver(() => {
+      if (document.title !== 'Ernit') {
+        console.log('🔄 Title changed to', document.title, '- resetting to Ernit');
+        document.title = 'Ernit';
+      }
+    });
+
+    // Observe the document title element
+    const titleElement = document.querySelector('title');
+    if (titleElement) {
+      observer.observe(titleElement, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
+
+    // Cleanup
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   // -----------------------------
   // RENDER
@@ -206,6 +249,7 @@ const AppNavigatorContent = ({ initialRoute }: { initialRoute: 'Onboarding' | 'C
       ref={navigationRef as any}
       onReady={() => {
         console.log('🧭 Navigation ready');
+        if (Platform.OS === 'web') document.title = 'Ernit';
         setIsNavigationReady(true);
       }}
       onStateChange={(navState) => {

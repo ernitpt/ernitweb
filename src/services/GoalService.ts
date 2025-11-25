@@ -206,10 +206,13 @@ export class GoalService {
     if (!g.weekStartAt || !g.id) return g;
 
     let anchor = new Date(g.weekStartAt);
-    const now = new Date();
+    anchor.setHours(0, 0, 0, 0); // Normalize to midnight
 
-    // If 7+ days have passed since the week started
-    if (now >= addDaysSafe(anchor, 7)) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0); // Normalize to midnight
+
+    // Check if we're at or past the start of the next week (midnight on the 7th day)
+    while (now >= addDaysSafe(anchor, 7)) {
       // Only count completed weeks toward progress
       if (g.isWeekCompleted || g.weeklyCount >= g.sessionsPerWeek) {
         g.currentCount += 1;
